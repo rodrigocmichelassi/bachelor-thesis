@@ -1,0 +1,109 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+__pypackages__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Virtual environments
+.env/
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# VSCode settings
+.vscode/
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Pytest cache
+.pytest_cache/
+
+# Coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+*.cover
+*.py,cover
+.hypothesis/
+
+# Translations
+*.mo
+*.pot
+
+# Logs and temp files
+*.log
+*.out
+*.err
+*.pid
+*.gz
+*.zip
+*.tar
+*.7z
+*.rar
+*.swp
+*.swo
+
+# Machine learning and datasets
+*.csv
+*.h5
+*.json
+*.pkl
+*.model
+*.joblib
+*.pb
+*.onnx
+
+# TensorFlow and PyTorch
+checkpoints/
+logs/
+*.tflite
+*.ckpt
+*.pt
+
+# IDEs
+.idea/
+
+# System files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+~$*
+
+# Other ignored files
+*.bak
+*.orig
+*.sh
+*.jpg
+logs
+images
