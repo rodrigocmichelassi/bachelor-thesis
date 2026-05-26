@@ -1,8 +1,11 @@
 import os
 import cv2
+import math
 import argparse
+import numpy as np
 import pandas as pd
 from ultralytics import YOLO
+from shapely.geometry import LineString, Point, Polygon
 # from src.utils.assess_quality import getEdgeDistance, getEdgeDistanceReal
 
 '''
@@ -14,6 +17,206 @@ and extract information, with special
 attention to the width of the bounding box
 (Disc Diameter DD)s
 '''
+
+# Gets bounds for retinal image
+# Parameters:
+#   - imageInfo: OpenCV image object
+def get_retina_bounds(image):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    # Threshold to isolate bright retinal region
+    _, thresh = cv2.threshold(gray, 10, 255, cv2.THRESH_BINARY)
+
+    # Remove tiny noise
+    kernel = np.ones((5, 5), np.uint8)
+    thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
+
+    # Find contours
+    contours, _ = cv2.findContours(
+        thresh,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE
+    )
+
+    if len(contours) == 0:
+        return None
+
+    # Largest contour = retina
+    retina_contour = max(contours, key=cv2.contourArea)
+
+    # Bounding box
+    x, _, w, _ = cv2.boundingRect(retina_contour)
+
+    retina_left = x
+    retina_right = x + w
+    retina_center_x = x + (w / 2)
+
+    return {
+        "left": retina_left,
+        "right": retina_right,
+        "center_x": retina_center_x,
+        "width": w,
+        "contour": retina_contour
+    }
+
+# Determine if the OD/Fovea is on the left, center or right of the image
+# Parameters:
+#   - imageInfo: object with info about the image passed on the model
+#   - imageWidth: width of the full image
+def determineStructureDirection(imageInfo, imagePath):
+    image = cv2.imread(imagePath)
+
+    retina_info = get_retina_bounds(image)
+
+    if retina_info is None:
+        return None
+
+    od_x = imageInfo.boxes.xywh[0][0].item()
+
+    retina_left = retina_info["left"]
+    retina_width = retina_info["width"]
+
+    relative_position = (
+        (od_x - retina_left) / retina_width
+    )
+
+    # 0.0 -> left
+    # 0.5 -> center
+    # 1 -> right
+    return relative_position
+
+# Return BBox needed information from a structure
+# Parameters:
+#   - imageInfo: bbox information
+#   - structure: 'od' or 'fovea'
+def getBboxInformation(imageInfo, structure):
+    xywh = imageInfo.boxes.xywh
+
+    cx = xywh[0][0].item()
+    cy = xywh[0][1].item()
+
+    if structure == 'fovea':
+        return np.array([cx, cy])
+    
+    width = xywh[0][2].item()
+    height = xywh[0][3].item()
+
+    return np.array([cx, cy]), width, height
+
+# Calculate the angle theta between the ODCenter
+# and foveaCenter
+# Parameters:
+#   - odCenter: np array with optic disc center coordinates
+#   - foveaCenter: np array with fovea center coordinates
+def calculateAngleDeg(odCenter, foveaCenter):
+    dx = foveaCenter[0] - odCenter[0]
+    dy = foveaCenter[1] - odCenter[1]
+
+    angleRad = math.atan2(abs(dy), abs(dx))
+
+    return math.degrees(angleRad)
+
+# Extract nasal point from OD, given a
+# Fovea-OD unit vector, pointing to the
+# nasal edge
+# Parameters:
+#   - odCenter: np array with optic disc center coordinates
+#   - width: optic disc width given by bbox
+#   - height: optic disc height given by bbox
+#   - nasalUnitVector: Fovea-OD unit vector
+def getNasalPointOnOD(odCenter, width, height, nasalUnitVector):
+    cx, cy = odCenter
+    ux, uy = nasalUnitVector
+
+    # retorna 1000 pontos, no intervalo [0, 2pi]
+    # e calcula equacoes parametricas da elipse
+    ts = np.linspace(0, 2*np.pi, 1000)
+    xs = (width/2) * np.cos(ts)
+    ys = (height/2) * np.sin(ts)
+
+    # projecoes na direção nasal (angulo OD e Fovea)
+    projections = xs * ux + ys * uy
+
+    # o maior valor aponta a projeção mais próxima do vetor nasal
+    idx = np.argmax(projections)
+
+    x_nasal = cx + xs[idx]
+    y_nasal = cy + ys[idx]
+
+    return x_nasal, y_nasal
+
+# Calculate distance from a point to its
+# closest edge (temporal or nasal)
+# Parameters:
+#   - image: cv2 image object
+#   - unitVector: nasal or temporal OD-Fovea unit vector
+#   - retinalPoint: point from retina to calculate distance from
+def calculateDistance(image, unitVector, retinalPoint):
+    grayImage = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    _, binary_mask = cv2.threshold(grayImage, 10, 255, cv2.THRESH_BINARY)
+
+    contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    main_contour = max(contours, key=cv2.contourArea)   # contorno mais externo da retina
+
+    retina_edge = Polygon(main_contour.squeeze())
+
+    if not retina_edge.contains(Point(retinalPoint)):
+        print("Ponto nasal já está na borda da retina ou fora dela — distância = 0")
+        return 0.0
+
+    line = LineString([retinalPoint, retinalPoint + 3000 * unitVector])
+    intersection = line.intersection(retina_edge.boundary)
+
+    if intersection.geom_type == 'MultiPoint':
+        nasalEdgePoint = min(intersection.geoms, key=lambda pt: pt.distance(Point(retinalPoint)))
+    elif intersection.geom_type == 'Point':
+        nasalEdgePoint = intersection
+    else:
+        raise ValueError("Interseção inesperada")
+
+    distance = Point(retinalPoint).distance(nasalEdgePoint)
+    
+    return distance
+
+# Calculate distance from temporal edge
+# to the Fovea and from nasal edge to 
+# the Optic Disc.
+# Parameters:
+#   - imagePath: path to the image file
+#   - odInfo: BBox information for OD
+#   - foveaInfo: BBox information for Fovea
+#   - saveNasalPoint: wheter to save or not nasal point image   
+#   - outputPath: where to save nasal point image
+def getEdgeDistanceReal(imagePath, odInfo, foveaInfo, saveNasalPoint=True, outputPath="./src/data/images"):
+    image = cv2.imread(imagePath)
+
+    odCenter, width, height = getBboxInformation(odInfo, structure='od')
+    foveaCenter = getBboxInformation(foveaInfo, structure='fovea')
+    
+    odFoveaVector = foveaCenter - odCenter
+    temporalUnitVector = odFoveaVector / np.linalg.norm(odFoveaVector)
+    nasalUnitVector = -temporalUnitVector
+
+    nasalX, nasalY = getNasalPointOnOD(odCenter, width, height, nasalUnitVector)
+    nasalPoint = np.array([nasalX, nasalY])
+
+    theta = calculateAngleDeg(odCenter, foveaCenter)
+    
+    if saveNasalPoint is True:
+        _, fileName = os.path.split(imagePath)
+
+        name, ext = os.path.splitext(fileName)
+        output_filename = f'{name}_nasal{ext}'
+
+        cv2.circle(image, (int(nasalX), int(nasalY)), radius=10, color=(255,0,0), thickness=-1)
+        cv2.circle(image, (int(odCenter[0]), int(odCenter[1])), radius=10, color=(255,0,0), thickness=-1)
+        cv2.circle(image, (int(foveaCenter[0]), int(foveaCenter[1])), radius=10, color=(255,0,0), thickness=-1)
+        cv2.imwrite(os.path.join(outputPath, output_filename), image)
+
+    nasalDistance = calculateDistance(image, nasalUnitVector, nasalPoint)
+    temporalDistance = calculateDistance(image, temporalUnitVector, np.array(foveaCenter))
+
+    return nasalDistance, temporalDistance, theta
 
 # Print obtained bounding box coordinates in different formats
 # Parameters:
@@ -38,9 +241,14 @@ def showResults(results):
 # Parameters:
 #   - bboxResults: bounding box ultralytics object
 def extractInformationFromPred(bboxResults):
-    confidence = bboxResults[0].boxes.conf.item()
-    centerCoords = [bboxResults[0].boxes.xywh[0][0].item(), bboxResults[0].boxes.xywh[0][1].item()]
-    width = bboxResults[0].boxes.xywh[0][2].item()
+    boxes = bboxResults[0].boxes
+
+    if boxes is None or len(boxes) == 0:
+        return None, None, None
+
+    confidence = boxes.conf.item()
+    centerCoords = [boxes.xywh[0][0].item(), boxes.xywh[0][1].item()]
+    width = boxes.xywh[0][2].item()
 
     return confidence, centerCoords, width
 
@@ -117,17 +325,20 @@ def draw_boxes(image, results, color, objectName=""):
 #   - foveaModel: model instance to detect fovea
 #   - saveImg: bool, save or not the image
 #   - output_path: where to save the image
-def getPredictions(imagePath, odModel, saveImg=False, output_path="./src/data/images/test.jpg",):
+def getPredictions(imagePath, odModel, foveaModel, saveImg=False, output_path="",):
+    _, fileName = os.path.split(imagePath)
     image = cv2.imread(imagePath)
 
     odResults = odModel.predict(imagePath, conf=0.5, max_det=1)
+    foveaResults = foveaModel.predict(imagePath, conf=0.5, max_det=1)
 
     draw_boxes(image, odResults, color=(0, 170, 0), objectName="Optic Disc: ")
+    draw_boxes(image, foveaResults, color=(255, 0, 0), objectName="Fovea: ")
 
     if saveImg is True:
         cv2.imwrite(output_path, image)
 
-    return odResults
+    return odResults, foveaResults
 
 # Given a dataset path, run the model on all the images of the dataset
 # Parameters:
@@ -195,9 +406,10 @@ def runModelOnImage(args, saveImg=True, showResults=False):
     imagePath = os.path.join(args.data_path, f'{args.image}.jpg')
     
     odModel = loadModel(args.od_weights)
+    foveaModel = loadModel(args.fovea_weights)
 
     # Run the model on an image to locate optic disc and fovea
-    odInfo, foveaInfo = getPredictions(imagePath, odModel, saveImg)
+    odInfo, foveaInfo = getPredictions(imagePath, odModel, foveaModel, saveImg)
     
     if not len(odInfo[0]) or not len(foveaInfo[0]):
         print(f"Could not detect Optic Disc or Fovea for {args.image}.jpg")
@@ -207,19 +419,19 @@ def runModelOnImage(args, saveImg=True, showResults=False):
         showResults(odInfo)
         showResults(foveaInfo)
     
-    # discDiameter = odInfo[0].boxes.xywh[0][2].item()
-    # print(f'The optic disc diameter is: {discDiameter:.2f}')
+    discDiameter = odInfo[0].boxes.xywh[0][2].item()
+    print(f'The optic disc diameter is: {discDiameter:.2f}')
 
     # Detect the distance between the edges and the optic disc/fovea
-    # nasalDistance, temporalDistance, theta = getEdgeDistanceReal(imagePath, odInfo[0], foveaInfo[0])
+    nasalDistance, temporalDistance, theta = getEdgeDistanceReal(imagePath, odInfo[0], foveaInfo[0])
     # nasalDistance = getEdgeDistance(imagePath, odInfo[0], structure='od')
     # temporalDistance = getEdgeDistance(imagePath, foveaInfo[0], structure='fovea')
 
-    # if nasalDistance < discDiameter:
-    #     print(f"The image is inadequate. Criteria: [1] the distance from the OD to the nasal edge ({nasalDistance:.2f}) is lower than 1DD ({discDiameter:.2f}).")
+    if nasalDistance < discDiameter:
+        print(f"The image is inadequate. Criteria: [1] the distance from the OD to the nasal edge ({nasalDistance:.2f}) is lower than 1DD ({discDiameter:.2f}).")
 
-    # if temporalDistance < 2*discDiameter:
-    #     print(f"The image is inadequate. Criteria: [2] the distance from the Macular Center to the temporal edge ({temporalDistance:.2f}) is lower than 2DD ({2*discDiameter:.2f}).")
+    if temporalDistance < 2*discDiameter:
+        print(f"The image is inadequate. Criteria: [2] the distance from the Macular Center to the temporal edge ({temporalDistance:.2f}) is lower than 2DD ({2*discDiameter:.2f}).")
 
 # Main execution, decides how to run the model
 def main(args):
