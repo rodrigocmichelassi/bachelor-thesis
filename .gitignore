@@ -8,6 +8,7 @@ __pypackages__/
 *.so
 
 # Virtual environments
+.env
 .env/
 .venv/
 env/
@@ -105,5 +106,7 @@ desktop.ini
 *.orig
 *.sh
 *.jpg
+*.png
+*.csv
 logs
 images
