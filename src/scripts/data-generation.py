@@ -1,5 +1,6 @@
 import os
 import sys
+import random
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
@@ -198,10 +199,6 @@ def generate_captions():
     )
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-    # add combined caption (mixing anatomy + disease)
-    # finish the anatomy prompt
-    # test in 10 images
-    # run the model for the whole dataset
     captions = []
     for _, row in brset_df.iterrows():
         image_name = row['image_id'] + '.jpg'
@@ -240,6 +237,66 @@ def generate_captions():
 
     captions_df.to_csv(os.path.join(data_path, 'captions.csv'), index=False)
 
+def get_classification_caption_from_row(row, n_captions=3):
+    DISEASE_TEMPLATES = [
+        "This is an image of {disease}.",
+        "This retinal image shows {disease}.",
+        "A fundus image with signs of {disease}.",
+        "Diagnosis: {disease}.",
+    ]
+
+    HEALTHY_TEMPLATES = [
+        "This is an image of a healthy retina.",
+        "This retinal image shows no signs of disease.",
+        "A healthy fundus image with no abnormalities.",
+        "Diagnosis: healthy retina.",
+    ]
+
+    DISEASE_COLUMNS = [
+        'diabetic_retinopathy', 'macular_edema', 'scar', 'nevus', 'amd',
+        'vascular_occlusion', 'hypertensive_retinopathy', 'drusens',
+        'hemorrhage', 'myopic_fundus', 'increased_cup_disc', 'other_abnormalities'
+    ]
+
+    if row.get('healthy') == 1:
+        templates = HEALTHY_TEMPLATES
+        return random.sample(templates, k=min(n_captions, len(templates)))
+
+    # find the single active disease column
+    active = [d for d in DISEASE_COLUMNS if row.get(d) == 1]
+
+    if len(active) == 0:
+        # no disease flagged and not healthy either — shouldn't happen if labels are clean
+        raise ValueError(f"No disease or healthy flag found for row: {row.get('image_id')}")
+    if len(active) > 1:
+        # more than one disease flagged — contradicts the single-label assumption
+        raise ValueError(f"Multiple diseases flagged for row: {row.get('image_id')} -> {active}")
+
+    disease_str = active[0].replace('_', ' ')
+    templates = random.sample(DISEASE_TEMPLATES, k=min(n_captions, len(DISEASE_TEMPLATES)))
+
+    return [t.format(disease=disease_str) for t in templates]
+
+def generate_classification_captions():
+    data_path = '/home/rodrigocm/tcc/data'
+    brset_df = pd.read_csv(os.path.join(data_path, 'brset_df.csv'))
+    brset_df.dropna(inplace=True)
+
+    captions = []
+    for _, row in brset_df.iterrows():
+        image_name = row['image_id'] + '.jpg'
+        class_captions = get_classification_caption_from_row(row)
+
+        captions.append({
+            "image_id": image_name,
+            "caption_1": class_captions[0],
+            "caption_2": class_captions[1],
+            "captio": class_captions[2]
+        })
+
+    captions_df = pd.DataFrame(captions)
+    captions_df.to_csv(os.path.join(data_path, 'classification_captions.csv'), index=False)
+
 def main(args):
     if args.prepare_df:
         prepare_dataframe(args.plot_distributions)
@@ -247,12 +304,16 @@ def main(args):
     if args.generate_captions:
         generate_captions()
 
+    if args.class_captions:
+        generate_classification_captions()
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Run SQL operations.")
 
     parser.add_argument('--prepare_df', type=int, default=1, help='Enrich dataframe with signals')
     parser.add_argument('--plot_distributions', type=int, default=1, help='Whether to plot data distributions or not')
     parser.add_argument('--generate_captions', type=int, default=1, help='Use LLM to generate captions from signals')
+    parser.add_argument('--class_captions', type=int, default=0, help='Generate disease captions for classification')
     
     args = parser.parse_args()
     
