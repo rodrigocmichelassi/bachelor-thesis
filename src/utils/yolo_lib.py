@@ -4,9 +4,11 @@ import math
 import argparse
 import numpy as np
 import pandas as pd
+
 from ultralytics import YOLO
 from shapely.geometry import LineString, Point, Polygon
 # from src.utils.assess_quality import getEdgeDistance, getEdgeDistanceReal
+from src.config import RAW_BRSET_LABELS_CSV, RAW_BRSET_IMAGES_DIR, MODELS_DIR, OD_MODEL_PATH, FOVEA_MODEL_PATH
 
 '''
 RUN YOLO MODEL ON RETINAL IMAGE
@@ -256,7 +258,7 @@ def extractInformationFromPred(bboxResults):
 # Parameters:
 #   - weightsPath: path to weights .pt to load model
 def loadModel(weightsPath):    
-    model = YOLO(os.path.join(weightsPath, 'best.pt'))
+    model = YOLO(weightsPath)
     return model
 
 # Run the model on an image and return results
@@ -326,7 +328,6 @@ def draw_boxes(image, results, color, objectName=""):
 #   - saveImg: bool, save or not the image
 #   - output_path: where to save the image
 def getPredictions(imagePath, odModel, foveaModel, saveImg=False, output_path="",):
-    _, fileName = os.path.split(imagePath)
     image = cv2.imread(imagePath)
 
     odResults = odModel.predict(imagePath, conf=0.5, max_det=1)
@@ -346,12 +347,11 @@ def getPredictions(imagePath, odModel, foveaModel, saveImg=False, output_path=""
 #   - saveImg: whether to save images inferences from models
 def runBRSetInferences(args, saveImg=False):
     writeFile = 'retinalInformation'
-    labelsPath = '/scratch/diogo.alves/datasets/brset/physionet.org/files/brazilian-ophthalmological/1.0.0/labels.csv'
 
     odModel = loadModel(args.od_weights)
     foveaModel = loadModel(args.fovea_weights)
 
-    labels = pd.read_csv(labelsPath)
+    labels = pd.read_csv(RAW_BRSET_LABELS_CSV)
     records = []
 
     for image in os.listdir(args.data_path):
@@ -446,9 +446,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Assess image field definition (BRSet)")
 
     parser.add_argument('--image', type=str, default=None, help='Fundus image name')
-    parser.add_argument('--data-path', type=str, default='/scratch/diogo.alves/datasets/brset/physionet.org/files/brazilian-ophthalmological/1.0.0/fundus_photos/', help='Fundus image dataset path')
-    parser.add_argument('--od-weights', type=str, default='/home/rodrigocm/research/YOLO-on-fundus-images/src/models/runs/detect/od_baseline2/train_results/weights', help='OD detection weights path')
-    parser.add_argument('--fovea-weights', type=str, default='/home/rodrigocm/research/YOLO-on-fundus-images/src/models/runs/detect/fovea/train_results/weights', help='Fovea detection weights path')
+    parser.add_argument('--data-path', type=str, default=RAW_BRSET_IMAGES_DIR, help='Fundus image dataset path')
+    parser.add_argument('--od-weights', type=str, default=OD_MODEL_PATH, help='OD detection weights path')
+    parser.add_argument('--fovea-weights', type=str, default=FOVEA_MODEL_PATH, help='Fovea detection weights path')
 
     args = parser.parse_args()
 

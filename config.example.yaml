@@ -1,0 +1,20 @@
+paths:
+  data_dir: ./data
+  models_dir: ./models
+
+data:
+  brset_labels_csv: brset_df.csv
+  captions_csv: captions.csv
+  classification_captions_csv: classification_captions.csv
+  images_dir: images
+  test_images_dir: test-images
+  distributions_dir: distributions
+
+models:
+  od_model: optic-disc-detection.pt
+  fovea_model: fovea-detection.pt
+
+raw_data:
+  dataset_dir: ./raw_data/brset   # point this at wherever your BRSET download lives
+  labels_file: labels.csv
+  images_subdir: imgs

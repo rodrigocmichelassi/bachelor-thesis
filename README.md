@@ -4,10 +4,6 @@ This project describes how to use CLIP and SIGLIP for retinal image-text alignme
 
 In this document, we intend to describe how to properly execute the scripts, what each of them do and use them for model training and image-searching from natural language.
 
-### Folders structure 
-
-**Fill this later**
-
 ### Data Generation
 
 `./src/notebooks/data-generation.ipynb`: This notebook is responsible for the analysis on the BRSET dataset, its data distribution regarding several signals we have for the dataset and defining how to generate the captions for each image.

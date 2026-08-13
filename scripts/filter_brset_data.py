@@ -1,14 +1,15 @@
 import os
 import pandas as pd
 
+from src.config import CAPTIONS_CSV, RAW_BRSET_IMAGES_DIR, IMAGES_DIR
+
 def main():
     count = 0
     skipped = 0
 
-    csv_path = '/home/rodrigocm/tcc/data/captions.csv'
-
-    brset_path = '/scratch/datasets/retina/brset/imgs'
-    dest_path = '/home/rodrigocm/tcc/data/images'
+    csv_path = CAPTIONS_CSV
+    brset_path = RAW_BRSET_IMAGES_DIR
+    dest_path = IMAGES_DIR
 
     brset_df = pd.read_csv(csv_path)
     os.makedirs(dest_path, exist_ok=True)
