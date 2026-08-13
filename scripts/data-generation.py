@@ -1,5 +1,4 @@
 import os
-import sys
 import random
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -8,8 +7,9 @@ import seaborn as sns
 import argparse
 
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from yolo_lib import getPredictions, extractInformationFromPred, getEdgeDistanceReal, determineStructureDirection
-from llm_lib import generate_anatomy_prompt, generate_disease_prompt, generate_quality_prompt, generate_combined_prompt, generate_image_caption
+from src.utils.yolo_lib import getPredictions, extractInformationFromPred, getEdgeDistanceReal, determineStructureDirection
+from src.utils.llm_lib import generate_anatomy_prompt, generate_disease_prompt, generate_quality_prompt, generate_image_caption
+from src.config import DISTRIBUTIONS_DIR, OD_MODEL_PATH, FOVEA_MODEL_PATH, BRSET_LABELS_CSV, CAPTIONS_CSV, CLASSIFICATION_CAPTIONS_CSV, RAW_BRSET_LABELS_CSV, RAW_BRSET_IMAGES_DIR 
 from ultralytics import YOLO
 
 def get_final_brset_df(filtered_brset_df):
@@ -28,13 +28,14 @@ def get_final_brset_df(filtered_brset_df):
     return final_brset_df
 
 def generate_distributions(df):
-    save_path = '/home/rodrigocm/tcc/data/distributions/'
+    save_path = DISTRIBUTIONS_DIR
+    save_path.mkdir(parents=True, exist_ok=True)
 
-    plot_distribution(df, 'od_fovea_angle_degrees', 'Angle between the Macula and Optic Disc in Degrees', save_path=f'{save_path}angle.png')
-    plot_distribution(df, 'od_diameter', 'Optic Disc diameter', save_path=f'{save_path}disc_diameter.png')
-    plot_distribution(df, 'nasal_distance', 'Distance from Optic Disc to the Nasal Edge', save_path=f'{save_path}nasal_dist.png')
-    plot_distribution(df, 'temporal_distance', 'Distance from the Macula to the Temporal Edge', save_path=f'{save_path}temporal_dist.png')
-    plot_distribution(df, 'od_side', 'Optic Disc relative position\n(0: left; 0.5: center; 1: right)', save_path=f'{save_path}od_side.png')
+    plot_distribution(df, 'od_fovea_angle_degrees', 'Angle between the Macula and Optic Disc in Degrees', save_path=save_path / 'angle.png')
+    plot_distribution(df, 'od_diameter', 'Optic Disc diameter', save_path=save_path / 'disc_diameter.png')
+    plot_distribution(df, 'nasal_distance', 'Distance from Optic Disc to the Nasal Edge', save_path=save_path / 'nasal_dist.png')
+    plot_distribution(df, 'temporal_distance', 'Distance from the Macula to the Temporal Edge', save_path=save_path / 'temporal_dist.png')
+    plot_distribution(df, 'od_side', 'Optic Disc relative position\n(0: left; 0.5: center; 1: right)', save_path=save_path / 'od_side.png')
 
 def plot_distribution(
     df,
@@ -42,12 +43,14 @@ def plot_distribution(
     xlabel,
     bins=40,
     figsize=(8, 5),
-    save_path='/home/rodrigocm/tcc/data/distributions/distribution.png'
+    save_path=None
 ):
+    if save_path is None:
+        save_path = DISTRIBUTIONS_DIR / 'distribution.png'
+        
     data = df[column_name].dropna()
 
     plt.figure(figsize=figsize)
-
     plt.hist(data, bins=bins, color='tab:blue', density=True, alpha=0.7)
     
     sns.kdeplot(data, color='tab:blue', linestyle='-')
@@ -130,24 +133,18 @@ def get_detection_models(od_model_path, fovea_model_path):
     return od_model, fovea_model
 
 def prepare_dataframe(plot_distributions):
-    data_path = '/home/rodrigocm/tcc/data'
-    brset_path = '/scratch/datasets/retina/brset'
-    od_model_path = '/home/rodrigocm/tcc/models/optic-disc-detection.pt'
-    fovea_model_path = '/home/rodrigocm/tcc/models/fovea-detection.pt'
+    od_model, fovea_model = get_detection_models(str(OD_MODEL_PATH), str(FOVEA_MODEL_PATH))
 
-    od_model, fovea_model = get_detection_models(od_model_path, fovea_model_path)
-
-    brset_df = pd.read_csv(os.path.join(brset_path, 'labels.csv'))
+    brset_df = pd.read_csv(RAW_BRSET_LABELS_CSV)
 
     filtered_brset_df = pre_process_brset_df(brset_df)
 
-    brset_images_path = os.path.join(brset_path, 'imgs')
     for idx, row in filtered_brset_df.iterrows():
         # remove this when actually running the algorithm
         print(f'Processing image {idx}')
 
         img_file = row['image_id'] + '.jpg'
-        image_path = os.path.join(brset_images_path, img_file)
+        image_path = os.path.join(RAW_BRSET_IMAGES_DIR, img_file)
         
         # Leverage YOLO Optic Disc and Fovea detection models to gather data
         od_results, fovea_results = getPredictions(imagePath=image_path, odModel=od_model, foveaModel=fovea_model, saveImg=False)
@@ -162,11 +159,10 @@ def prepare_dataframe(plot_distributions):
         generate_distributions(filtered_brset_df)
 
     final_brset_df = get_final_brset_df(filtered_brset_df)
-    final_brset_df.to_csv(os.path.join(data_path, 'brset_df.csv'), index=False)
+    final_brset_df.to_csv(BRSET_LABELS_CSV, index=False)
 
 def generate_captions():
-    data_path = '/home/rodrigocm/tcc/data'
-    brset_df = pd.read_csv(os.path.join(data_path, 'brset_df.csv'))
+    brset_df = pd.read_csv(BRSET_LABELS_CSV)
     brset_df.dropna(inplace=True)
 
     SYSTEM_PROMPT = """
@@ -235,7 +231,7 @@ def generate_captions():
 
     captions_df = pd.DataFrame(captions)
 
-    captions_df.to_csv(os.path.join(data_path, 'captions.csv'), index=False)
+    captions_df.to_csv(CAPTIONS_CSV, index=False)
 
 def get_classification_caption_from_row(row, n_captions=3):
     DISEASE_TEMPLATES = [
@@ -278,8 +274,7 @@ def get_classification_caption_from_row(row, n_captions=3):
     return [t.format(disease=disease_str) for t in templates]
 
 def generate_classification_captions():
-    data_path = '/home/rodrigocm/tcc/data'
-    brset_df = pd.read_csv(os.path.join(data_path, 'brset_df.csv'))
+    brset_df = pd.read_csv(BRSET_LABELS_CSV)
     brset_df.dropna(inplace=True)
 
     captions = []
@@ -295,7 +290,7 @@ def generate_classification_captions():
         })
 
     captions_df = pd.DataFrame(captions)
-    captions_df.to_csv(os.path.join(data_path, 'classification_captions.csv'), index=False)
+    captions_df.to_csv(CLASSIFICATION_CAPTIONS_CSV, index=False)
 
 def main(args):
     if args.prepare_df:
@@ -317,6 +312,4 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
     
-    sys.path.append('.')
-
     main(args)
