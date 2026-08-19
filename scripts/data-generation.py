@@ -256,7 +256,8 @@ def get_classification_caption_from_row(row, n_captions=3):
 
     if row.get('healthy') == 1:
         templates = HEALTHY_TEMPLATES
-        return random.sample(templates, k=min(n_captions, len(templates)))
+        sampled = random.sample(templates, k=min(n_captions, len(templates)))
+        return sampled, 'healthy'
 
     # find the single active disease column
     active = [d for d in DISEASE_COLUMNS if row.get(d) == 1]
@@ -271,7 +272,7 @@ def get_classification_caption_from_row(row, n_captions=3):
     disease_str = active[0].replace('_', ' ')
     templates = random.sample(DISEASE_TEMPLATES, k=min(n_captions, len(DISEASE_TEMPLATES)))
 
-    return [t.format(disease=disease_str) for t in templates]
+    return [t.format(disease=disease_str) for t in templates], disease_str
 
 def generate_classification_captions():
     brset_df = pd.read_csv(BRSET_LABELS_CSV)
@@ -280,13 +281,14 @@ def generate_classification_captions():
     captions = []
     for _, row in brset_df.iterrows():
         image_name = row['image_id'] + '.jpg'
-        class_captions = get_classification_caption_from_row(row)
+        class_captions, class_name = get_classification_caption_from_row(row)
 
         captions.append({
             "image_id": image_name,
+            "class": class_name,
             "caption_1": class_captions[0],
             "caption_2": class_captions[1],
-            "captio": class_captions[2]
+            "caption_3": class_captions[2]
         })
 
     captions_df = pd.DataFrame(captions)
