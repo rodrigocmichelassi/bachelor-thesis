@@ -28,10 +28,12 @@ class RetinalClassCaptionDataset(Dataset):
 
     def __getitem__(self, idx):
         row = self.captions.iloc[idx]
+
         image_path = f"{self.image_dir}/{row['image_id']}"
         image = Image.open(image_path).convert("RGB")
 
         # sample a different caption each time this item is fetched
         caption = row[random.choice(self.caption_cols)]
+        class_label = row["class"]
 
-        return image, caption
+        return image, caption, class_label
