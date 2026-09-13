@@ -29,6 +29,7 @@ DISTRIBUTIONS_DIR = DATA_DIR / _cfg["data"]["distributions_dir"]
 # --- Models ---
 OD_MODEL_PATH = MODELS_DIR / _cfg["models"]["od_model"]
 FOVEA_MODEL_PATH = MODELS_DIR / _cfg["models"]["fovea_model"]
+CLIP_BEST_MODEL = MODELS_DIR / _cfg["models"]["clip_weights"]
 
 # --- Raw dataset (external source, e.g. BRSET download) ---
 RAW_BRSET_DIR = Path(_cfg["raw_data"]["dataset_dir"])
