@@ -32,21 +32,21 @@ def get_dataloaders(train_dataset, test_dataset, val_dataset):
 
     train_loader = DataLoader(
         train_dataset,
-        batch_size=32,
+        batch_size=256,
         shuffle=True,
         collate_fn=partial(collate_fn, processor=processor),
     )
 
     test_loader = DataLoader(
         test_dataset,
-        batch_size=32,
+        batch_size=256,
         shuffle=False,
         collate_fn=partial(collate_fn, processor=processor),
     )
 
     val_loader = DataLoader(
         val_dataset,
-        batch_size=32,
+        batch_size=256,
         shuffle=True,
         collate_fn=partial(collate_fn, processor=processor),
     )

@@ -1,11 +1,12 @@
 import torch
+import torch.nn.functional as F
 from sklearn.metrics import accuracy_score, balanced_accuracy_score, classification_report, confusion_matrix
 
 # evaluate_dataset calculates the cosine similarity between
 # each batch image embeddings and all the possible labels embeddings
 # and gets the closest mapping from each image to each text to perform
 # a classification using CLIP.
-def evaluate_dataset(model, processor, test_loader, class_labels, device):
+def evaluate_dataset(model, processor, test_loader, class_labels, device, debug=False):
     # Batch size: 32, len(class_labels): 13
     model.to(device)
     model.eval()
@@ -21,12 +22,14 @@ def evaluate_dataset(model, processor, test_loader, class_labels, device):
         text_embeds = model.get_text_features(**text_inputs)
         text_embeds = text_embeds / text_embeds.norm(p=2, dim=-1, keepdim=True) # text_embeds: [13, embed_dim]
 
-    text_sim = text_embeds @ text_embeds.T  # [13, 13]
-    print(text_sim) 
+    if debug:
+        text_sim = text_embeds @ text_embeds.T  # [13, 13]
+        print(text_sim) 
 
     true_labels = []
     predicted_labels = []
 
+    running_loss = 0.0
     with torch.no_grad():
         for batch in test_loader:
 
@@ -40,6 +43,14 @@ def evaluate_dataset(model, processor, test_loader, class_labels, device):
             # calculates clip similarity matrix
             similarity = logit_scale * image_embeds @ text_embeds.T  # cosine similarity, [32, 13], CLIP matrix
 
+            # classification loss: cross-entropy against the true class index
+            true_idx = torch.tensor(
+                [class_names.index(label) for label in batch_true_labels],
+                device=device
+            )
+            loss = F.cross_entropy(similarity, true_idx)
+            running_loss += loss.item()
+
             # for each row (batch image), gets the max score for cosine similarity
             # (classification label for each image)
             batch_predicted_idx = similarity.argmax(dim=1)
@@ -48,7 +59,9 @@ def evaluate_dataset(model, processor, test_loader, class_labels, device):
             true_labels.extend(batch_true_labels)
             predicted_labels.extend(batch_predicted_labels)
 
-    return true_labels, predicted_labels
+    loss = running_loss / len(test_loader)
+
+    return true_labels, predicted_labels, loss
 
 def calculate_classification_metrics(true_labels, pred_labels, class_labels, print_results=True):
     class_names = list(class_labels.keys())

@@ -13,6 +13,7 @@ data:
 models:
   od_model: optic-disc-detection.pt
   fovea_model: fovea-detection.pt
+  clip_weights: clip_weights/best.pt
 
 raw_data:
   dataset_dir: ./raw_data/brset   # point this at wherever your BRSET download lives

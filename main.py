@@ -1,12 +1,11 @@
 import argparse
 import torch
-import json
-from datetime import datetime
-from pathlib import Path
-
 from src.data.import_data import import_data
-from src.models.model import load_raw_clip_model
+from src.training.train import train_classifier
 from src.training.evaluate import evaluate_dataset, calculate_classification_metrics
+from src.utils.helper import log_zero_shot_results, plot_training_evolution
+from src.models.model import load_raw_clip_model, load_lora_clip, load_fine_tuned_clip
+from src.config import CLIP_BEST_MODEL
 
 # build_class_labels returns a list of classification class labels
 def build_class_labels():
@@ -25,55 +24,63 @@ def build_class_labels():
     return class_labels
 
 # run_zero_shot runs a zero-shot classification on the test set
-def run_zero_shot(test_loader, class_labels, log_results=False):
+def run_zero_shot(gpu, test_loader, class_labels, log_results=False):
     print("Running zero-shot classification")
 
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    device = torch.device(f"cuda:{gpu}") if torch.cuda.is_available() else torch.device("cpu")
 
     model, processor = load_raw_clip_model()
-    true_labels, pred_labels = evaluate_dataset(model, processor, test_loader, class_labels, device)
+    true_labels, pred_labels, loss = evaluate_dataset(model, processor, test_loader, class_labels, device)
     acc, bal_acc, report, cm = calculate_classification_metrics(true_labels, pred_labels, class_labels)
 
     if log_results:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_dir = Path("logs")
-        log_dir.mkdir(exist_ok=True)
+        log_zero_shot_results(acc, loss, bal_acc, cm, report)
 
-        result = {
-            "run": "zero_shot_classification",
-            "timestamp": timestamp,
-            "accuracy": acc,
-            "balanced_accuracy": bal_acc,
-            "confusion_matrix": cm.tolist(),
-        }
+# train a CLIP classifier using the captions under
+# `data/classification_captions.csv` for each BRSET image
+def train_classifier_model(args, train_loader, val_loader, class_labels):
+    device = torch.device(f"cuda:{args.gpu}") if torch.cuda.is_available() else torch.device("cpu")
+    print(f"Using device: {device}")
 
-        with open(log_dir / f"zero_shot_{timestamp}.json", "w") as f:
-            json.dump(result, f, indent=2)
+    model, processor = load_lora_clip(debug=True)
+    train_acc, train_loss, val_acc, val_loss = train_classifier(device, model, train_loader, val_loader, processor, class_labels)
 
-        # human-readable version alongside it
-        with open(log_dir / f"zero_shot_{timestamp}.txt", "w") as f:
-            f.write(f"Timestamp: {timestamp}\n")
-            f.write(f"Accuracy: {acc}\n")
-            f.write(f"Balanced Accuracy: {bal_acc}\n")
-            f.write(f"Classification Report:\n{report}\n")
-            f.write(f"Confusion Matrix:\n{cm}\n")
+    plot_training_evolution(train_acc, train_loss, val_acc, val_loss, args.save_plots_path)
+
+# Evaluate the results of a finetuned model for classification
+def evaluate_classifier_model(gpu, test_loader, class_labels):
+    device = torch.device(f"cuda:{gpu}") if torch.cuda.is_available() else torch.device("cpu")
+
+    model, processor = load_fine_tuned_clip(CLIP_BEST_MODEL)
+    true_labels, pred_labels, loss = evaluate_dataset(model, processor, test_loader, class_labels, device, debug=False)
+    acc, bal_acc, report, cm = calculate_classification_metrics(true_labels, pred_labels, class_labels)
+
+    print(f"Test Results:\nAcc: {acc} - Balanced Accuracy: {bal_acc} - Loss: {loss}")
+    print(report)
+    print(cm)
 
 def main(args):
     train_loader, val_loader, test_loader = import_data()
     class_labels = build_class_labels()
 
     if args.zero_shot:
-        run_zero_shot(test_loader, class_labels, log_results=True)
+        run_zero_shot(args.gpu, test_loader, class_labels, log_results=True)
+
+    if args.train_classifier:
+        train_classifier_model(args, train_loader, val_loader, class_labels)
+        evaluate_classifier_model(args.gpu, test_loader, class_labels)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Operations with CLIP model.")
 
+    parser.add_argument('--gpu', type=int, default=0, help='Index of the GPU to be used for training')
+    parser.add_argument('--lr', type=float, default=1e-4, help='Training Learning Rate')
+    parser.add_argument('--epochs', type=int, default=40, help='Number of training epochs')
+    parser.add_argument('--l2', type=float, default=0.0, help='L2 Regularization value')
+    parser.add_argument('--save_plots_path', type=str, help='Where to save plots')
     parser.add_argument('--zero_shot', type=int, default=0, help='Run a zero-shot classification with CLIP (no fine-tuning/LoRA)')
+    parser.add_argument('--train_classifier', type=int, default=1, help='Run the training loop for CLIP classification (fine-tuning with LoRA)')
 
     args = parser.parse_args()
-
-    # next steps:
-    # 1. Run zero-shot evaluation to define baseline. Define fixated seed for testing comparison
-    # 2. LoRA for fine-tuning CLIP + training loop
 
     main(args)
