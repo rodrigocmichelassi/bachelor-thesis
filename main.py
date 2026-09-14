@@ -43,7 +43,7 @@ def train_classifier_model(args, train_loader, val_loader, class_labels):
     print(f"Using device: {device}")
 
     model, processor = load_lora_clip(debug=True)
-    train_acc, train_loss, val_acc, val_loss = train_classifier(device, model, train_loader, val_loader, processor, class_labels)
+    train_acc, train_loss, val_acc, val_loss = train_classifier(args, device, model, train_loader, val_loader, processor, class_labels)
 
     plot_training_evolution(train_acc, train_loss, val_acc, val_loss, args.save_plots_path)
 

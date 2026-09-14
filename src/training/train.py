@@ -1,8 +1,7 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
-from tqdm import tqdm
-from src.training.loss import contrastive_loss
+# from tqdm import tqdm
 from src.training.evaluate import evaluate_dataset
 from src.config import CLIP_BEST_MODEL
 
@@ -77,7 +76,7 @@ def train_one_epoch(device, model, optimizer, train_loader):
     model.train()
     running_loss = 0.0
 
-    for batch in tqdm(train_loader, desc="Training"):
+    for batch in train_loader:
         optimizer.zero_grad()
 
         input_ids = batch["input_ids"].to(device)

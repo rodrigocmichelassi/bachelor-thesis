@@ -37,11 +37,11 @@ def evaluate_dataset(model, processor, test_loader, class_labels, device, debug=
             batch_true_labels = batch["class_labels"]
 
             image_embeds = model.get_image_features(pixel_values=pixel_values)
-            image_embeds = image_embeds / image_embeds.norm(p=2, dim=-1, keepdim=True)  # image_embeds: [32, embed_dim]
+            image_embeds = image_embeds / image_embeds.norm(p=2, dim=-1, keepdim=True)  # image_embeds: [batch_size, embed_dim]
 
             logit_scale = model.logit_scale.exp()
             # calculates clip similarity matrix
-            similarity = logit_scale * image_embeds @ text_embeds.T  # cosine similarity, [32, 13], CLIP matrix
+            similarity = logit_scale * image_embeds @ text_embeds.T  # cosine similarity, [batch_size, 13], CLIP matrix
 
             # classification loss: cross-entropy against the true class index
             true_idx = torch.tensor(

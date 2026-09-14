@@ -20,7 +20,7 @@ def collate_fn(batch, processor):
         padding=True,
     )
 
-    inputs["class_labels"] = list(class_labels)
+    inputs["class_labels"] = list(class_labels) 
 
     # Batches of (image/text) tensors and attention_mask (for text and image, due to padding)
     # wraps `pixel_values`, `input_ids`, `attention_mask` and `class_labels`.
@@ -87,9 +87,10 @@ def import_data(debug=False):
 
     train_loader, test_loader, val_loader = get_dataloaders(train_dataset, test_dataset, val_dataset)
 
-    batch = next(iter(train_loader))
 
     if debug:
+        batch = next(iter(train_loader))
+        
         print(batch.keys())
         print(batch["pixel_values"].shape)
         print(batch["input_ids"].shape)
