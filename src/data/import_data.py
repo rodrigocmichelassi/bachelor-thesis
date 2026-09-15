@@ -35,6 +35,8 @@ def get_dataloaders(train_dataset, test_dataset, val_dataset):
         batch_size=256,
         shuffle=True,
         collate_fn=partial(collate_fn, processor=processor),
+        num_workers=16,
+        pin_memory=True,
     )
 
     test_loader = DataLoader(
@@ -42,6 +44,8 @@ def get_dataloaders(train_dataset, test_dataset, val_dataset):
         batch_size=256,
         shuffle=False,
         collate_fn=partial(collate_fn, processor=processor),
+        num_workers=16,
+        pin_memory=True,
     )
 
     val_loader = DataLoader(
@@ -49,6 +53,8 @@ def get_dataloaders(train_dataset, test_dataset, val_dataset):
         batch_size=256,
         shuffle=True,
         collate_fn=partial(collate_fn, processor=processor),
+        num_workers=16,
+        pin_memory=True,
     )
 
     return train_loader, test_loader, val_loader

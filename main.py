@@ -60,6 +60,8 @@ def evaluate_classifier_model(gpu, test_loader, class_labels):
     print(cm)
 
 def main(args):
+    print(f"Training CLIP with lr: {args.lr} - l2: {args.l2} - epochs: {args.epochs}")
+
     train_loader, val_loader, test_loader = import_data()
     class_labels = build_class_labels()
 
