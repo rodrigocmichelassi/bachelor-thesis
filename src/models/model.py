@@ -30,7 +30,7 @@ def load_fine_tuned_clip(adapter_path, debug=False):
     base_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
     processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
-    model = PeftModel.from_pretrained(base_model, adapter_path)
+    model = PeftModel.from_pretrained(base_model, str(adapter_path))
 
     if debug:
         model.print_trainable_parameters()

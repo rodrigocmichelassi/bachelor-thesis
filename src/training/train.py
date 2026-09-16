@@ -3,7 +3,7 @@ import torch.nn.functional as F
 import numpy as np
 # from tqdm import tqdm
 from src.training.evaluate import evaluate_dataset
-from src.config import CLIP_BEST_MODEL
+from src.utils.helper import get_run_checkpoint_path
 
 def contrastive_loss(image_embeds, text_embeds, logit_scale):
     image_embeds = image_embeds / image_embeds.norm(p=2, dim=-1, keepdim=True)
@@ -29,6 +29,7 @@ def train_classifier(args, device, model, train_loader, val_loader, processor, c
 
     patience = 7
     epochs_without_improvement = 0
+    checkpoint_path = get_run_checkpoint_path(args.lr, args.l2)
 
     train_acc_list = []
     train_loss_list = []
@@ -61,7 +62,7 @@ def train_classifier(args, device, model, train_loader, val_loader, processor, c
             max_acc = val_acc
             chosen_loss = val_loss
             epochs_without_improvement = 0
-            model.save_pretrained(CLIP_BEST_MODEL)
+            model.save_pretrained(checkpoint_path)
         else:
             epochs_without_improvement += 1
             if epochs_without_improvement > patience:

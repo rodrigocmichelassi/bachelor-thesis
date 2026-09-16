@@ -3,7 +3,7 @@ import torch
 from src.data.import_data import import_data
 from src.training.train import train_classifier
 from src.training.evaluate import evaluate_dataset, calculate_classification_metrics
-from src.utils.helper import log_zero_shot_results, plot_training_evolution
+from src.utils.helper import log_zero_shot_results, plot_training_evolution, get_run_checkpoint_path
 from src.models.model import load_raw_clip_model, load_lora_clip, load_fine_tuned_clip
 from src.config import CLIP_BEST_MODEL
 
@@ -45,13 +45,16 @@ def train_classifier_model(args, train_loader, val_loader, class_labels):
     model, processor = load_lora_clip(debug=True)
     train_acc, train_loss, val_acc, val_loss = train_classifier(args, device, model, train_loader, val_loader, processor, class_labels)
 
-    plot_training_evolution(train_acc, train_loss, val_acc, val_loss, args.save_plots_path)
+    plot_training_evolution(args, train_acc, train_loss, val_acc, val_loss)
 
 # Evaluate the results of a finetuned model for classification
-def evaluate_classifier_model(gpu, test_loader, class_labels):
-    device = torch.device(f"cuda:{gpu}") if torch.cuda.is_available() else torch.device("cpu")
+def evaluate_classifier_model(args, test_loader, class_labels):
+    print(f"Evaluate model with lr: {args.lr}, l2: {args.l2}")
 
-    model, processor = load_fine_tuned_clip(CLIP_BEST_MODEL)
+    device = torch.device(f"cuda:{args.gpu}") if torch.cuda.is_available() else torch.device("cpu")
+    checkpoint_path = get_run_checkpoint_path(args.lr, args.l2)
+
+    model, processor = load_fine_tuned_clip(checkpoint_path)
     true_labels, pred_labels, loss = evaluate_dataset(model, processor, test_loader, class_labels, device, debug=False)
     acc, bal_acc, report, cm = calculate_classification_metrics(true_labels, pred_labels, class_labels)
 
@@ -70,18 +73,26 @@ def main(args):
 
     if args.train_classifier:
         train_classifier_model(args, train_loader, val_loader, class_labels)
-        evaluate_classifier_model(args.gpu, test_loader, class_labels)
+        evaluate_classifier_model(args, test_loader, class_labels)
+
+    if args.evaluate_classifier:
+        evaluate_classifier_model(args, test_loader, class_labels)
+
+    # Next steps: 
+    # - apply seed to all training, to make it reproducible
+    # - train the image retrieval model
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Operations with CLIP model.")
 
     parser.add_argument('--gpu', type=int, default=0, help='Index of the GPU to be used for training')
     parser.add_argument('--lr', type=float, default=1e-4, help='Training Learning Rate')
-    parser.add_argument('--epochs', type=int, default=40, help='Number of training epochs')
+    parser.add_argument('--epochs', type=int, default=60, help='Number of training epochs')
     parser.add_argument('--l2', type=float, default=0.0, help='L2 Regularization value')
     parser.add_argument('--save_plots_path', type=str, help='Where to save plots')
     parser.add_argument('--zero_shot', type=int, default=0, help='Run a zero-shot classification with CLIP (no fine-tuning/LoRA)')
     parser.add_argument('--train_classifier', type=int, default=1, help='Run the training loop for CLIP classification (fine-tuning with LoRA)')
+    parser.add_argument('--evaluate_classifier', type=int, default=0, help='Run only evaluation, model chosen based on lr and l2 weights')
 
     args = parser.parse_args()
 

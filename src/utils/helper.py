@@ -2,6 +2,11 @@ import json
 from datetime import datetime
 from pathlib import Path
 from matplotlib import pyplot as plt
+from src.config import MODELS_DIR
+
+def get_run_checkpoint_path(lr, l2, base_dir=MODELS_DIR):
+    run_name = f"lr_{lr}_l2_{l2}"
+    return base_dir / "clip_weights" / run_name
 
 def log_zero_shot_results(acc, loss, bal_acc, cm, report):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -29,7 +34,8 @@ def log_zero_shot_results(acc, loss, bal_acc, cm, report):
         f.write(f"Classification Report:\n{report}\n")
         f.write(f"Confusion Matrix:\n{cm}\n")
 
-def plot_training_evolution(train_acc, train_loss, val_acc, val_loss, save_path):
+def plot_training_evolution(args, train_acc, train_loss, val_acc, val_loss):
+    save_path = args.save_path
     epochs = range(1, len(train_acc) + 1)
 
     _, axes = plt.subplots(1, 2, figsize=(12, 5))
@@ -37,7 +43,7 @@ def plot_training_evolution(train_acc, train_loss, val_acc, val_loss, save_path)
     # Accuracy plot
     axes[0].plot(epochs, train_acc, label="Train Accuracy", marker="o")
     axes[0].plot(epochs, val_acc, label="Validation Accuracy", marker="o")
-    axes[0].set_title("Accuracy Evolution")
+    axes[0].set_title(f"Accuracy Evolution - lr: {args.lr}, l2: {args.l2}")
     axes[0].set_xlabel("Epoch")
     axes[0].set_ylabel("Accuracy")
     axes[0].legend()
@@ -46,7 +52,7 @@ def plot_training_evolution(train_acc, train_loss, val_acc, val_loss, save_path)
     # Loss plot
     axes[1].plot(epochs, train_loss, label="Train Loss", marker="o")
     axes[1].plot(epochs, val_loss, label="Validation Loss", marker="o")
-    axes[1].set_title("Loss Evolution")
+    axes[1].set_title(f"Loss Evolution - lr: {args.lr}, l2: {args.l2}")
     axes[1].set_xlabel("Epoch")
     axes[1].set_ylabel("Loss")
     axes[1].legend()
