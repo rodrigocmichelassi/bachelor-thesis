@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 from matplotlib import pyplot as plt
-from src.config import MODELS_DIR
+from src.config import MODELS_DIR, PLOTS_DIR
 
 def get_run_checkpoint_path(lr, l2, base_dir=MODELS_DIR):
     run_name = f"lr_{lr}_l2_{l2}"
@@ -35,10 +35,10 @@ def log_zero_shot_results(acc, loss, bal_acc, cm, report):
         f.write(f"Confusion Matrix:\n{cm}\n")
 
 def plot_training_evolution(args, train_acc, train_loss, val_acc, val_loss):
-    save_path = args.save_path
+    save_path = PLOTS_DIR
     epochs = range(1, len(train_acc) + 1)
 
-    _, axes = plt.subplots(1, 2, figsize=(12, 5))
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
     # Accuracy plot
     axes[0].plot(epochs, train_acc, label="Train Accuracy", marker="o")
@@ -60,8 +60,11 @@ def plot_training_evolution(args, train_acc, train_loss, val_acc, val_loss):
 
     plt.tight_layout()
 
-    if save_path:
-        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+    save_path = PLOTS_DIR / f"lr_{args.lr}_l2_{args.l2}.png"
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+
+    plt.close(fig)
 
 if __name__ == '__main__':
     pass

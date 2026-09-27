@@ -25,6 +25,7 @@ CLASSIFICATION_CAPTIONS_CSV = DATA_DIR / _cfg["data"]["classification_captions_c
 IMAGES_DIR = DATA_DIR / _cfg["data"]["images_dir"]
 TEST_IMAGES_DIR = DATA_DIR / _cfg["data"]["test_images_dir"]
 DISTRIBUTIONS_DIR = DATA_DIR / _cfg["data"]["distributions_dir"]
+PLOTS_DIR = DATA_DIR / _cfg["data"]["plots_dir"]
 
 # --- Models ---
 OD_MODEL_PATH = MODELS_DIR / _cfg["models"]["od_model"]

@@ -9,6 +9,7 @@ data:
   images_dir: images
   test_images_dir: test-images
   distributions_dir: distributions
+  plots_dir: plots
 
 models:
   od_model: optic-disc-detection.pt

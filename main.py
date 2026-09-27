@@ -5,7 +5,6 @@ from src.training.train import train_classifier
 from src.training.evaluate import evaluate_dataset, calculate_classification_metrics
 from src.utils.helper import log_zero_shot_results, plot_training_evolution, get_run_checkpoint_path
 from src.models.model import load_raw_clip_model, load_lora_clip, load_fine_tuned_clip
-from src.config import CLIP_BEST_MODEL
 
 # build_class_labels returns a list of classification class labels
 def build_class_labels():
