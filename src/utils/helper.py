@@ -1,8 +1,19 @@
 import json
-from datetime import datetime
+import torch
+import random
+import numpy as np
 from pathlib import Path
+from datetime import datetime
 from matplotlib import pyplot as plt
 from src.config import MODELS_DIR, PLOTS_DIR
+
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 def get_run_checkpoint_path(lr, l2, base_dir=MODELS_DIR):
     run_name = f"lr_{lr}_l2_{l2}"

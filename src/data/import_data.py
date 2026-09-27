@@ -1,3 +1,6 @@
+import torch
+import random
+import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from transformers import CLIPProcessor
@@ -6,6 +9,12 @@ from functools import partial
 
 from src.config import CLASSIFICATION_CAPTIONS_CSV, IMAGES_DIR
 from src.dataset import RetinalClassCaptionDataset
+
+# seed_worker sets a seed for pytorch dataloader workers
+def seed_worker(worker_id):
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
 
 # collate_fn turns the list of samples into pre-processed tensor batches
 def collate_fn(batch, processor):
@@ -27,7 +36,7 @@ def collate_fn(batch, processor):
     return inputs
 
 # get_dataloaders get a list of (image, text) pair dataloaders for model training
-def get_dataloaders(train_dataset, test_dataset, val_dataset):
+def get_dataloaders(train_dataset, test_dataset, val_dataset, seed):
     processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
     train_loader = DataLoader(
@@ -37,6 +46,8 @@ def get_dataloaders(train_dataset, test_dataset, val_dataset):
         collate_fn=partial(collate_fn, processor=processor),
         num_workers=16,
         pin_memory=True,
+        worker_init_fn=seed_worker,
+        generator=torch.Generator().manual_seed(seed)
     )
 
     test_loader = DataLoader(
@@ -82,7 +93,7 @@ def get_df_split(df, debug):
 
 # import_data is responsible for importing and pre-processing 
 # the data used to train the models
-def import_data(debug=False):
+def import_data(args, debug=False):
     captions_df = pd.read_csv(CLASSIFICATION_CAPTIONS_CSV)
 
     train_df, test_df, val_df = get_df_split(captions_df, debug)
@@ -91,7 +102,7 @@ def import_data(debug=False):
     val_dataset = RetinalClassCaptionDataset(val_df, IMAGES_DIR)
     test_dataset = RetinalClassCaptionDataset(test_df, IMAGES_DIR)
 
-    train_loader, test_loader, val_loader = get_dataloaders(train_dataset, test_dataset, val_dataset)
+    train_loader, test_loader, val_loader = get_dataloaders(train_dataset, test_dataset, val_dataset, args.seed)
 
 
     if debug:

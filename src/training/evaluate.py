@@ -72,6 +72,7 @@ def calculate_classification_metrics(true_labels, pred_labels, class_labels, pri
     cm = confusion_matrix(true_labels, pred_labels, labels=class_names)
 
     if print_results:
+        print("\n-*-*- Test results -*-*-\n")
         print(f'Accuracy: {accuracy}')
         print(f'Balanced Accuracy: {balanced_accuracy}')
         print(f'Classification Report: \n{report}')

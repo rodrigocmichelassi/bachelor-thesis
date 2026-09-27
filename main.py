@@ -3,7 +3,7 @@ import torch
 from src.data.import_data import import_data
 from src.training.train import train_classifier
 from src.training.evaluate import evaluate_dataset, calculate_classification_metrics
-from src.utils.helper import log_zero_shot_results, plot_training_evolution, get_run_checkpoint_path
+from src.utils.helper import log_zero_shot_results, plot_training_evolution, get_run_checkpoint_path, set_seed
 from src.models.model import load_raw_clip_model, load_lora_clip, load_fine_tuned_clip
 
 # build_class_labels returns a list of classification class labels
@@ -54,17 +54,14 @@ def evaluate_classifier_model(args, test_loader, class_labels):
     checkpoint_path = get_run_checkpoint_path(args.lr, args.l2)
 
     model, processor = load_fine_tuned_clip(checkpoint_path)
-    true_labels, pred_labels, loss = evaluate_dataset(model, processor, test_loader, class_labels, device, debug=False)
-    acc, bal_acc, report, cm = calculate_classification_metrics(true_labels, pred_labels, class_labels)
-
-    print(f"Test Results:\nAcc: {acc} - Balanced Accuracy: {bal_acc} - Loss: {loss}")
-    print(report)
-    print(cm)
+    true_labels, pred_labels, _ = evaluate_dataset(model, processor, test_loader, class_labels, device, debug=False)
+    calculate_classification_metrics(true_labels, pred_labels, class_labels)
 
 def main(args):
+    set_seed(args.seed)
     print(f"Training CLIP with lr: {args.lr} - l2: {args.l2} - epochs: {args.epochs}")
 
-    train_loader, val_loader, test_loader = import_data()
+    train_loader, val_loader, test_loader = import_data(args)
     class_labels = build_class_labels()
 
     if args.zero_shot:
@@ -84,6 +81,7 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Operations with CLIP model.")
 
+    parser.add_argument('--seed', type=int, default=42, help='Seed value for training reproducibility')
     parser.add_argument('--gpu', type=int, default=0, help='Index of the GPU to be used for training')
     parser.add_argument('--lr', type=float, default=1e-4, help='Training Learning Rate')
     parser.add_argument('--epochs', type=int, default=60, help='Number of training epochs')
