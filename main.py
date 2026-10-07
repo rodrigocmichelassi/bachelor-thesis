@@ -51,7 +51,7 @@ def evaluate_classifier_model(args, test_loader, class_labels):
     print(f"Evaluate model with lr: {args.lr}, l2: {args.l2}")
 
     device = torch.device(f"cuda:{args.gpu}") if torch.cuda.is_available() else torch.device("cpu")
-    checkpoint_path = get_run_checkpoint_path(args.lr, args.l2)
+    checkpoint_path = get_run_checkpoint_path(args.lr, args.l2, args.weight_classes)
 
     model, processor = load_fine_tuned_clip(checkpoint_path)
     true_labels, pred_labels, _ = evaluate_dataset(model, processor, test_loader, class_labels, device, debug=False)
@@ -83,9 +83,10 @@ if __name__ == '__main__':
 
     parser.add_argument('--seed', type=int, default=42, help='Seed value for training reproducibility')
     parser.add_argument('--gpu', type=int, default=0, help='Index of the GPU to be used for training')
-    parser.add_argument('--lr', type=float, default=1e-4, help='Training Learning Rate')
     parser.add_argument('--epochs', type=int, default=60, help='Number of training epochs')
+    parser.add_argument('--lr', type=float, default=1e-4, help='Training Learning Rate')
     parser.add_argument('--l2', type=float, default=0.0, help='L2 Regularization value')
+    parser.add_argument('--weight_classes', type=int, default=0, help='0: no weighting, 1: inverse frequency, 2: sqrt-smoothed inverse frequency')
     parser.add_argument('--save_plots_path', type=str, help='Where to save plots')
     parser.add_argument('--zero_shot', type=int, default=0, help='Run a zero-shot classification with CLIP (no fine-tuning/LoRA)')
     parser.add_argument('--train_classifier', type=int, default=1, help='Run the training loop for CLIP classification (fine-tuning with LoRA)')

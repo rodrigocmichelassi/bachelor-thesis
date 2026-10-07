@@ -17,7 +17,7 @@ def seed_worker(worker_id):
     random.seed(worker_seed)
 
 # collate_fn turns the list of samples into pre-processed tensor batches
-def collate_fn(batch, processor):
+def collate_fn(batch, processor, class_weights_dict=None):
     images, texts, class_labels = zip(*batch)
 
     # Wraps an image feature extractor and a text tokeziner
@@ -29,21 +29,23 @@ def collate_fn(batch, processor):
         padding=True,
     )
 
-    inputs["class_labels"] = list(class_labels) 
-
+    inputs["class_labels"] = list(class_labels)
+    if class_weights_dict is not None:
+        inputs["sample_weights"] = torch.tensor([class_weights_dict[c] for c in class_labels], dtype=torch.float)
+ 
     # Batches of (image/text) tensors and attention_mask (for text and image, due to padding)
     # wraps `pixel_values`, `input_ids`, `attention_mask` and `class_labels`.
     return inputs
 
 # get_dataloaders get a list of (image, text) pair dataloaders for model training
-def get_dataloaders(train_dataset, test_dataset, val_dataset, seed):
+def get_dataloaders(train_dataset, test_dataset, val_dataset, class_weights_dict, seed):
     processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
     train_loader = DataLoader(
         train_dataset,
         batch_size=256,
         shuffle=True,
-        collate_fn=partial(collate_fn, processor=processor),
+        collate_fn=partial(collate_fn, processor=processor, class_weights_dict=class_weights_dict),
         num_workers=16,
         pin_memory=True,
         worker_init_fn=seed_worker,
@@ -98,11 +100,22 @@ def import_data(args, debug=False):
 
     train_df, test_df, val_df = get_df_split(captions_df, debug)
 
+    # class weights: 1 / count or 1 / sqrt(count) per class
+    # to help weight the least frequent classes, without overvaluing these.
+    class_counts = train_df["class"].value_counts()
+
+    class_weights_dict = None
+    if args.weight_classes == 1:
+        class_weights_dict = {cls: 1.0 / count for cls, count in class_counts.items()}
+    elif args.weight_classes == 2:
+        class_weights_dict = {cls: 1.0 / (count**0.5) for cls, count in class_counts.items()} 
+
     train_dataset = RetinalClassCaptionDataset(train_df, IMAGES_DIR)
     val_dataset = RetinalClassCaptionDataset(val_df, IMAGES_DIR)
     test_dataset = RetinalClassCaptionDataset(test_df, IMAGES_DIR)
 
-    train_loader, test_loader, val_loader = get_dataloaders(train_dataset, test_dataset, val_dataset, args.seed)
+    train_loader, test_loader, val_loader = get_dataloaders(
+        train_dataset, test_dataset, val_dataset, class_weights_dict, args.seed)
 
 
     if debug:

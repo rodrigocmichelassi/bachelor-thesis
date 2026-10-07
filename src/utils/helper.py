@@ -1,3 +1,4 @@
+import os
 import json
 import torch
 import random
@@ -15,8 +16,8 @@ def set_seed(seed):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def get_run_checkpoint_path(lr, l2, base_dir=MODELS_DIR):
-    run_name = f"lr_{lr}_l2_{l2}"
+def get_run_checkpoint_path(lr, l2, wc, base_dir=MODELS_DIR):
+    run_name = f"lr_{lr}_l2_{l2}_wc_{wc}"
     return base_dir / "clip_weights" / run_name
 
 def log_zero_shot_results(acc, loss, bal_acc, cm, report):
@@ -54,7 +55,7 @@ def plot_training_evolution(args, train_acc, train_loss, val_acc, val_loss):
     # Accuracy plot
     axes[0].plot(epochs, train_acc, label="Train Accuracy", marker="o")
     axes[0].plot(epochs, val_acc, label="Validation Accuracy", marker="o")
-    axes[0].set_title(f"Accuracy Evolution - lr: {args.lr}, l2: {args.l2}")
+    axes[0].set_title(f"Accuracy Evolution - lr: {args.lr}, l2: {args.l2}, wc: {args.weight_classes}")
     axes[0].set_xlabel("Epoch")
     axes[0].set_ylabel("Accuracy")
     axes[0].legend()
@@ -63,7 +64,7 @@ def plot_training_evolution(args, train_acc, train_loss, val_acc, val_loss):
     # Loss plot
     axes[1].plot(epochs, train_loss, label="Train Loss", marker="o")
     axes[1].plot(epochs, val_loss, label="Validation Loss", marker="o")
-    axes[1].set_title(f"Loss Evolution - lr: {args.lr}, l2: {args.l2}")
+    axes[1].set_title(f"Loss Evolution - lr: {args.lr}, l2: {args.l2}, wc: {args.weight_classes}")
     axes[1].set_xlabel("Epoch")
     axes[1].set_ylabel("Loss")
     axes[1].legend()
@@ -71,8 +72,12 @@ def plot_training_evolution(args, train_acc, train_loss, val_acc, val_loss):
 
     plt.tight_layout()
 
+    save_dir = PLOTS_DIR / f"wc{args.weight_classes}"
+    
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
-    save_path = PLOTS_DIR / f"lr_{args.lr}_l2_{args.l2}.png"
+    save_dir.mkdir(parents=True, exist_ok=True)
+    
+    save_path = save_dir / f"lr_{args.lr}_l2_{args.l2}.png"
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
 
     plt.close(fig)

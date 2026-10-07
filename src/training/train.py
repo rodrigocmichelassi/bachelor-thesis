@@ -5,7 +5,7 @@ import numpy as np
 from src.training.evaluate import evaluate_dataset
 from src.utils.helper import get_run_checkpoint_path
 
-def contrastive_loss(image_embeds, text_embeds, logit_scale):
+def contrastive_loss(image_embeds, text_embeds, logit_scale, sample_weights=None):
     image_embeds = image_embeds / image_embeds.norm(p=2, dim=-1, keepdim=True)
     text_embeds = text_embeds / text_embeds.norm(p=2, dim=-1, keepdim=True)
 
@@ -15,10 +15,16 @@ def contrastive_loss(image_embeds, text_embeds, logit_scale):
     batch_size = image_embeds.shape[0]
     labels = torch.arange(batch_size, device=image_embeds.device)
 
-    loss_i = F.cross_entropy(logits_per_image, labels)
-    loss_t = F.cross_entropy(logits_per_text, labels)
+    loss_i = F.cross_entropy(logits_per_image, labels, reduction="none")  # [batch_size] - one loss value per sample
+    loss_t = F.cross_entropy(logits_per_text, labels, reduction="none")   # [batch_size] - one loss value per sample
 
-    return (loss_i + loss_t) / 2
+    per_sample_loss = (loss_i + loss_t) / 2
+
+    if sample_weights is not None:
+        per_sample_loss = per_sample_loss * sample_weights  # give more weights to rare samples
+        return per_sample_loss.sum() / sample_weights.sum()
+    else:
+        return per_sample_loss.mean()
 
 def train_classifier(args, device, model, train_loader, val_loader, processor, class_labels):
     model.to(device)
@@ -29,7 +35,7 @@ def train_classifier(args, device, model, train_loader, val_loader, processor, c
 
     patience = 7
     epochs_without_improvement = 0
-    checkpoint_path = get_run_checkpoint_path(args.lr, args.l2)
+    checkpoint_path = get_run_checkpoint_path(args.lr, args.l2, args.weight_classes)
 
     train_acc_list = []
     train_loss_list = []
@@ -89,7 +95,8 @@ def train_one_epoch(device, model, optimizer, train_loader):
 
         logit_scale = model.logit_scale.exp()
 
-        loss = contrastive_loss(image_embeds, text_embeds, logit_scale)
+        sample_weights = batch["sample_weights"].to(device)
+        loss = contrastive_loss(image_embeds, text_embeds, logit_scale, sample_weights)
         loss.backward()
 
         optimizer.step()
