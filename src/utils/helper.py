@@ -6,7 +6,8 @@ import numpy as np
 from pathlib import Path
 from datetime import datetime
 from matplotlib import pyplot as plt
-from src.config import MODELS_DIR, PLOTS_DIR
+from src.config import MODELS_DIR, PLOTS_DIR, IMAGES_DIR
+from src.dataset import SingleRowRetrievalDataset, MultiRowRetrievalDataset
 
 def set_seed(seed):
     random.seed(seed)
@@ -16,9 +17,11 @@ def set_seed(seed):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def get_run_checkpoint_path(lr, l2, wc, base_dir=MODELS_DIR):
-    run_name = f"lr_{lr}_l2_{l2}_wc_{wc}"
-    return base_dir / "clip_weights" / run_name
+def get_run_checkpoint_path(args, base_dir=MODELS_DIR):
+    chosen_model = 'classifier' if args.training_mode == 'classifier' else 'retrieval'
+ 
+    run_name = f"lr_{args.lr}_l2_{args.l2}_wc_{args.weight_classes}"
+    return base_dir / f"clip_weights/{chosen_model}" / run_name
 
 def log_zero_shot_results(acc, loss, bal_acc, cm, report):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -81,6 +84,32 @@ def plot_training_evolution(args, train_acc, train_loss, val_acc, val_loss):
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
 
     plt.close(fig)
+
+# to_long_format gets the 3 caption columns and split into 3 rows,
+# with "image_id" and "caption" cols
+def to_long_format(df, seed=42):
+    cols = ["disease_caption", "anatomy_caption", "quality_caption"]
+    long_df = (
+        df.melt(id_vars="image_id", value_vars=cols, value_name="caption")
+          [["image_id", "caption"]]
+    )
+    return long_df.sample(frac=1, random_state=seed).reset_index(drop=True)
+
+# get_retrieval_dataset returns the dataset to be used for training
+# and evaluation, based on the retrieval_mode chosen
+def get_retrieval_dataset(args, train_df, test_df, val_df):
+    if args.retrieval_mode == 'single_row':
+        train_ds = SingleRowRetrievalDataset(train_df, IMAGES_DIR)  # random caption per epoch
+        test_ds = MultiRowRetrievalDataset(to_long_format(test_df, args.seed), IMAGES_DIR)
+        val_ds = MultiRowRetrievalDataset(to_long_format(val_df, args.seed), IMAGES_DIR)
+    elif args.retrieval_mode == 'multi_row':
+        train_ds = MultiRowRetrievalDataset(train_df, IMAGES_DIR)
+        test_ds = MultiRowRetrievalDataset(test_df, IMAGES_DIR)
+        val_ds = MultiRowRetrievalDataset(val_df, IMAGES_DIR)
+    else:
+        raise ValueError('--retrieval_mode is one of {single_row, multi_row}.')
+
+    return train_ds, test_ds, val_ds
 
 if __name__ == '__main__':
     pass

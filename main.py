@@ -1,10 +1,15 @@
+import os
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+
 import argparse
 import torch
 from src.data.import_data import import_data
 from src.training.train import train_classifier
-from src.training.evaluate import evaluate_dataset, calculate_classification_metrics
+from src.training.evaluate import evaluate_classifier, evaluate_retrieval, calculate_classification_metrics, show_retrieval_metrics
 from src.utils.helper import log_zero_shot_results, plot_training_evolution, get_run_checkpoint_path, set_seed
 from src.models.model import load_raw_clip_model, load_lora_clip, load_fine_tuned_clip
+
+
 
 # build_class_labels returns a list of classification class labels
 def build_class_labels():
@@ -23,19 +28,29 @@ def build_class_labels():
     return class_labels
 
 # run_zero_shot runs a zero-shot classification on the test set
-def run_zero_shot(gpu, test_loader, class_labels, log_results=False):
-    print("Running zero-shot classification")
-
-    device = torch.device(f"cuda:{gpu}") if torch.cuda.is_available() else torch.device("cpu")
-
+def run_zero_shot(args, test_loader, log_results=False):
+    print(f"Running zero-shot {args.zero_shot_mode}")
+    
+    device = torch.device(f"cuda:{args.gpu}") if torch.cuda.is_available() else torch.device("cpu")
     model, processor = load_raw_clip_model()
-    true_labels, pred_labels, loss = evaluate_dataset(model, processor, test_loader, class_labels, device)
-    acc, bal_acc, report, cm = calculate_classification_metrics(true_labels, pred_labels, class_labels)
 
-    if log_results:
-        log_zero_shot_results(acc, loss, bal_acc, cm, report)
+    if args.zero_shot_mode == 'classifier':
+        class_labels = build_class_labels()
 
-# train a CLIP classifier using the captions under
+        true_labels, pred_labels, loss = evaluate_classifier(model, processor, test_loader, class_labels, device)
+        acc, bal_acc, report, cm = calculate_classification_metrics(true_labels, pred_labels, class_labels)
+
+        if log_results:
+            log_zero_shot_results(acc, loss, bal_acc, cm, report)
+        
+    elif args.zero_shot_mode == 'retrieval':
+        recall_at_k = evaluate_retrieval(model, test_loader, device)
+        show_retrieval_metrics(recall_at_k)
+    
+    else:
+        raise ValueError(f"Invalid zero-shot evaluation mode!")
+
+# train_classifier_model train a CLIP classifier using the captions under
 # `data/classification_captions.csv` for each BRSET image
 def train_classifier_model(args, train_loader, val_loader, class_labels):
     device = torch.device(f"cuda:{args.gpu}") if torch.cuda.is_available() else torch.device("cpu")
@@ -46,37 +61,42 @@ def train_classifier_model(args, train_loader, val_loader, class_labels):
 
     plot_training_evolution(args, train_acc, train_loss, val_acc, val_loss)
 
-# Evaluate the results of a finetuned model for classification
+# evaluate_classifier_model evaluates the results of a finetuned model for classification
 def evaluate_classifier_model(args, test_loader, class_labels):
     print(f"Evaluate model with lr: {args.lr}, l2: {args.l2}")
 
     device = torch.device(f"cuda:{args.gpu}") if torch.cuda.is_available() else torch.device("cpu")
-    checkpoint_path = get_run_checkpoint_path(args.lr, args.l2, args.weight_classes)
+    checkpoint_path = get_run_checkpoint_path(args)
 
     model, processor = load_fine_tuned_clip(checkpoint_path)
-    true_labels, pred_labels, _ = evaluate_dataset(model, processor, test_loader, class_labels, device, debug=False)
+    true_labels, pred_labels, _ = evaluate_classifier(model, processor, test_loader, class_labels, device, debug=False)
     calculate_classification_metrics(true_labels, pred_labels, class_labels)
+
+def evaluate_retrieval_model(args, test_loader):
+    print(f"Evaluate model with lr: {args.lr}, l2: {args.l2}")
+    
+    device = torch.device(f"cuda:{args.gpu}") if torch.cuda.is_available() else torch.device("cpu")
+    checkpoint_path = get_run_checkpoint_path(args)
 
 def main(args):
     set_seed(args.seed)
-    print(f"Training CLIP with lr: {args.lr} - l2: {args.l2} - epochs: {args.epochs}")
-
     train_loader, val_loader, test_loader = import_data(args)
-    class_labels = build_class_labels()
+    
+    if args.training_mode == 'zero_shot':
+        run_zero_shot(args, test_loader, log_results=True)
+        return 0
 
-    if args.zero_shot:
-        run_zero_shot(args.gpu, test_loader, class_labels, log_results=True)
-
-    if args.train_classifier:
+    print(f"Training CLIP with lr: {args.lr} - l2: {args.l2} - epochs: {args.epochs}")
+    if args.training_mode == 'classifier':
+        class_labels = build_class_labels()
         train_classifier_model(args, train_loader, val_loader, class_labels)
         evaluate_classifier_model(args, test_loader, class_labels)
 
+    if args.training_mode == 'retrieval':
+        pass
+
     if args.evaluate_classifier:
         evaluate_classifier_model(args, test_loader, class_labels)
-
-    # Next steps: 
-    # - apply seed to all training, to make it reproducible
-    # - train the image retrieval model
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Operations with CLIP model.")
@@ -87,10 +107,10 @@ if __name__ == '__main__':
     parser.add_argument('--lr', type=float, default=1e-4, help='Training Learning Rate')
     parser.add_argument('--l2', type=float, default=0.0, help='L2 Regularization value')
     parser.add_argument('--weight_classes', type=int, default=0, help='0: no weighting, 1: inverse frequency, 2: sqrt-smoothed inverse frequency')
-    parser.add_argument('--save_plots_path', type=str, help='Where to save plots')
-    parser.add_argument('--zero_shot', type=int, default=0, help='Run a zero-shot classification with CLIP (no fine-tuning/LoRA)')
-    parser.add_argument('--train_classifier', type=int, default=1, help='Run the training loop for CLIP classification (fine-tuning with LoRA)')
-    parser.add_argument('--evaluate_classifier', type=int, default=0, help='Run only evaluation, model chosen based on lr and l2 weights')
+    parser.add_argument('--training_mode', type=str, default='retrieval', help='One of: {zero_shot, retrieval, classifier}')
+    parser.add_argument('--zero_shot_mode', type=str, default='retrieval', help='One of: {classifier, retrieval}')
+    parser.add_argument('--retrieval_mode', type=str, default='single_row', help='Which dataset to use for image retrieval training. One of: {single_row, multi_row}')
+    parser.add_argument('--evaluate_classifier', type=int, default=0, help='Run *only* evaluation, model chosen based on lr and l2 weights')
 
     args = parser.parse_args()
 

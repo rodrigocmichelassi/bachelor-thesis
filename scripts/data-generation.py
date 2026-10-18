@@ -9,8 +9,11 @@ import argparse
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from src.utils.yolo_lib import getPredictions, extractInformationFromPred, getEdgeDistanceReal, determineStructureDirection
 from src.utils.llm_lib import generate_anatomy_prompt, generate_disease_prompt, generate_quality_prompt, generate_image_caption
-from src.config import DISTRIBUTIONS_DIR, OD_MODEL_PATH, FOVEA_MODEL_PATH, BRSET_LABELS_CSV, CAPTIONS_CSV, CLASSIFICATION_CAPTIONS_CSV, RAW_BRSET_LABELS_CSV, RAW_BRSET_IMAGES_DIR 
+from src.config import DISTRIBUTIONS_DIR, OD_MODEL_PATH, FOVEA_MODEL_PATH, BRSET_LABELS_CSV, SR_RETRIEVAL_CAPTIONS_CSV, MR_RETRIEVAL_CAPTIONS_CSV, CLASSIFICATION_CAPTIONS_CSV, RAW_BRSET_LABELS_CSV, RAW_BRSET_IMAGES_DIR 
 from ultralytics import YOLO
+
+# Avoid downloading the Qwen during every execution
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 def get_final_brset_df(filtered_brset_df):
     columns_to_keep = ['image_id', 'exam_eye', 'DR_ICDR', 'focus', 'iluminaton', 
@@ -161,7 +164,7 @@ def prepare_dataframe(plot_distributions):
     final_brset_df = get_final_brset_df(filtered_brset_df)
     final_brset_df.to_csv(BRSET_LABELS_CSV, index=False)
 
-def generate_captions():
+def generate_retrieval_captions():
     brset_df = pd.read_csv(BRSET_LABELS_CSV)
     brset_df.dropna(inplace=True)
 
@@ -195,7 +198,8 @@ def generate_captions():
     )
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-    captions = []
+    single_row_captions = []
+    multi_row_captions = []
     for _, row in brset_df.iterrows():
         image_name = row['image_id'] + '.jpg'
 
@@ -209,29 +213,41 @@ def generate_captions():
         quality_caption = generate_image_caption(quality_prompt, SYSTEM_PROMPT, model, tokenizer)
         # combined_caption = generate_image_caption(combined_prompt, SYSTEM_PROMPT, model, tokenizer)
 
-        captions.append({
+        single_row_captions.append({
+            "image_id": image_name,
+            "disease_caption": disease_caption,
+            "anatomy_caption": anatomy_caption,
+            "quality_caption": quality_caption
+        })
+
+        multi_row_captions.append({
             "image_id": image_name,
             "caption": disease_caption
         })
 
-        captions.append({
+        multi_row_captions.append({
             "image_id": image_name,
             "caption": anatomy_caption
         })
 
-        captions.append({
+        multi_row_captions.append({
             "image_id": image_name,
             "caption": quality_caption
         })
 
-        # captions.append({
+        # multi_row_captions.append({
         #     "image_id": image_name,
         #     "caption": combined_caption
         # })
 
-    captions_df = pd.DataFrame(captions)
+    single_row_captions_df = pd.DataFrame(single_row_captions)
+    multi_row_captions_df = pd.DataFrame(multi_row_captions)
 
-    captions_df.to_csv(CAPTIONS_CSV, index=False)
+    single_row_captions_df.to_csv(SR_RETRIEVAL_CAPTIONS_CSV, index=False)
+    multi_row_captions_df.to_csv(MR_RETRIEVAL_CAPTIONS_CSV, index=False)
+
+    print(f"Saved Single Row Captions to {SR_RETRIEVAL_CAPTIONS_CSV}")
+    print(f"Saved Multi Row Captions to {MR_RETRIEVAL_CAPTIONS_CSV}")
 
 def get_classification_caption_from_row(row, n_captions=3):
     DISEASE_TEMPLATES = [
@@ -298,10 +314,12 @@ def main(args):
     if args.prepare_df:
         prepare_dataframe(args.plot_distributions)
     
-    if args.generate_captions:
-        generate_captions()
+    if args.caption_mode == 'retrieval':
+        print("Generating captions for Image Retrieval")
+        generate_retrieval_captions()
 
-    if args.class_captions:
+    if args.caption_mode == 'classification':
+        print("Generating captions for Image Classification")
         generate_classification_captions()
 
 if __name__ == '__main__':
@@ -309,8 +327,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--prepare_df', type=int, default=1, help='Enrich dataframe with signals')
     parser.add_argument('--plot_distributions', type=int, default=1, help='Whether to plot data distributions or not')
-    parser.add_argument('--generate_captions', type=int, default=1, help='Use LLM to generate captions from signals')
-    parser.add_argument('--class_captions', type=int, default=0, help='Generate disease captions for classification')
+    parser.add_argument('--caption_mode', type=str, default='retrieval', help='One of: {retrieval, classification}')
     
     args = parser.parse_args()
     

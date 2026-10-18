@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 # from tqdm import tqdm
-from src.training.evaluate import evaluate_dataset
+from src.training.evaluate import evaluate_classifier
 from src.utils.helper import get_run_checkpoint_path
 
 def contrastive_loss(image_embeds, text_embeds, logit_scale, sample_weights=None):
@@ -35,7 +35,7 @@ def train_classifier(args, device, model, train_loader, val_loader, processor, c
 
     patience = 7
     epochs_without_improvement = 0
-    checkpoint_path = get_run_checkpoint_path(args.lr, args.l2, args.weight_classes)
+    checkpoint_path = get_run_checkpoint_path(args)
 
     train_acc_list = []
     train_loss_list = []
@@ -46,8 +46,8 @@ def train_classifier(args, device, model, train_loader, val_loader, processor, c
         contrastive_train_loss = train_one_epoch(device, model, optimizer, train_loader)
 
         model.eval()
-        train_true_labels, train_pred_labels, train_loss = evaluate_dataset(model, processor, train_loader, class_labels, device)
-        val_true_labels, val_pred_labels, val_loss = evaluate_dataset(model, processor, val_loader, class_labels, device)
+        train_true_labels, train_pred_labels, train_loss = evaluate_classifier(model, processor, train_loader, class_labels, device)
+        val_true_labels, val_pred_labels, val_loss = evaluate_classifier(model, processor, val_loader, class_labels, device)
 
         train_acc = np.mean(np.array(train_true_labels) == np.array(train_pred_labels))
         val_acc = np.mean(np.array(val_true_labels) == np.array(val_pred_labels))

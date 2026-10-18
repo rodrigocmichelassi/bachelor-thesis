@@ -1,13 +1,13 @@
 import os
 import pandas as pd
 
-from src.config import CAPTIONS_CSV, RAW_BRSET_IMAGES_DIR, IMAGES_DIR
+from src.config import MR_RETRIEVAL_CAPTIONS_CSV, RAW_BRSET_IMAGES_DIR, IMAGES_DIR
 
 def main():
     count = 0
     skipped = 0
 
-    csv_path = CAPTIONS_CSV
+    csv_path = MR_RETRIEVAL_CAPTIONS_CSV
     brset_path = RAW_BRSET_IMAGES_DIR
     dest_path = IMAGES_DIR
 
