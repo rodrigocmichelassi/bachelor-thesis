@@ -20,7 +20,8 @@ MODELS_DIR = (PROJECT_ROOT / _cfg["paths"]["models_dir"]).resolve()
 
 # --- Data files / subfolders ---
 BRSET_LABELS_CSV = DATA_DIR / _cfg["data"]["brset_labels_csv"]
-CAPTIONS_CSV = DATA_DIR / _cfg["data"]["captions_csv"]
+SR_RETRIEVAL_CAPTIONS_CSV = DATA_DIR / _cfg["data"]["sr_retrieval_captions_csv"]
+MR_RETRIEVAL_CAPTIONS_CSV = DATA_DIR / _cfg["data"]["mr_retrieval_captions_csv"]
 CLASSIFICATION_CAPTIONS_CSV = DATA_DIR / _cfg["data"]["classification_captions_csv"]
 IMAGES_DIR = DATA_DIR / _cfg["data"]["images_dir"]
 TEST_IMAGES_DIR = DATA_DIR / _cfg["data"]["test_images_dir"]

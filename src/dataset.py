@@ -3,19 +3,43 @@ import pandas as pd
 from PIL import Image
 from torch.utils.data import Dataset
 
-class ImageTextDataset(Dataset):
-    def __init__(self, image_paths, captions, processor):
-        self.image_paths = image_paths
-        self.captions = captions
-        self.processor = processor
+class SingleRowRetrievalDataset(Dataset):
+    def __init__(self, captions, image_dir):
+        self.image_dir = image_dir
+        self.captions = captions.reset_index(drop=True)
+        self.caption_cols = ["disease_caption", "anatomy_caption", "quality_caption"]
 
     def __len__(self):
-        return len(self.image_paths)
+        return len(self.captions)
 
     def __getitem__(self, idx):
-        image = Image.open(self.image_paths[idx]).convert("RGB")
-        text = self.captions[idx]
-        return image, text
+        row = self.captions.iloc[idx]
+
+        image_path = f'{self.image_dir}/{row["image_id"]}'
+        image = Image.open(image_path).convert("RGB")
+
+        caption = row[random.choice(self.caption_cols)]
+
+        return image, caption, row["image_id"]
+
+
+class MultiRowRetrievalDataset(Dataset):
+    def __init__(self, captions, image_dir):
+        self.image_dir = image_dir
+        self.captions = captions.reset_index(drop=True)
+
+    def __len__(self):
+        return len(self.captions)
+
+    def __getitem__(self, idx):
+        row = self.captions.iloc[idx]
+
+        image_path = f"{self.image_dir}/{row['image_id']}"
+        image = Image.open(image_path).convert("RGB")
+
+        caption = row["caption"]
+
+        return image, caption, row["image_id"]
 
 class RetinalClassCaptionDataset(Dataset):
     def __init__(self, captions, image_dir):
