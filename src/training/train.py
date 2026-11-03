@@ -2,29 +2,13 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 # from tqdm import tqdm
-from src.training.evaluate import evaluate_classifier
+from src.training.loss import contrastive_loss
+from src.training.evaluate import evaluate_classifier, evaluate_retrieval
 from src.utils.helper import get_run_checkpoint_path
 
-def contrastive_loss(image_embeds, text_embeds, logit_scale, sample_weights=None):
-    image_embeds = image_embeds / image_embeds.norm(p=2, dim=-1, keepdim=True)
-    text_embeds = text_embeds / text_embeds.norm(p=2, dim=-1, keepdim=True)
-
-    logits_per_image = logit_scale * image_embeds @ text_embeds.T
-    logits_per_text = logits_per_image.T
-
-    batch_size = image_embeds.shape[0]
-    labels = torch.arange(batch_size, device=image_embeds.device)
-
-    loss_i = F.cross_entropy(logits_per_image, labels, reduction="none")  # [batch_size] - one loss value per sample
-    loss_t = F.cross_entropy(logits_per_text, labels, reduction="none")   # [batch_size] - one loss value per sample
-
-    per_sample_loss = (loss_i + loss_t) / 2
-
-    if sample_weights is not None:
-        per_sample_loss = per_sample_loss * sample_weights  # give more weights to rare samples
-        return per_sample_loss.sum() / sample_weights.sum()
-    else:
-        return per_sample_loss.mean()
+def val_t2i_mean_recall(recall):
+    t2i = recall["t2i"]
+    return sum(t2i.values()) / len(t2i)
 
 def train_classifier(args, device, model, train_loader, val_loader, processor, class_labels):
     model.to(device)
@@ -79,6 +63,48 @@ def train_classifier(args, device, model, train_loader, val_loader, processor, c
 
     return train_acc_list, train_loss_list, val_acc_list, val_loss_list
 
+def train_retrieval(args, device, model, train_loader, val_loader):
+    model.to(device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.l2)
+
+    best_t2i_recall = -1.0
+    best_recall = None
+    patience = 7
+    epochs_without_improvement = 0
+    checkpoint_path = get_run_checkpoint_path(args)
+
+    train_loss_list, val_loss_list, val_recall_list = [], [], []
+
+    for epoch in range(args.epochs):
+        train_loss = train_one_epoch(device, model, optimizer, train_loader)
+
+        val_recall, val_loss = evaluate_retrieval(model, val_loader, device)
+        t2i_recall = val_t2i_mean_recall(val_recall)   # get text-to-image recall for early stopping
+
+        train_loss_list.append(train_loss)
+        val_loss_list.append(val_loss)
+        val_recall_list.append(val_recall)
+
+        print(f"Epoch {epoch+1}/{args.epochs} - \
+                train_loss: {train_loss:.4f} - \
+                val_loss: {val_loss:.4f} - \
+                val_t2i_mean_recall: {t2i_recall:.4f} - \
+                val_recall@k: {val_recall}")
+
+        if t2i_recall > best_t2i_recall:
+            best_t2i_recall = t2i_recall
+            best_recall = val_recall
+            epochs_without_improvement = 0
+            model.save_pretrained(checkpoint_path)
+        else:
+            epochs_without_improvement += 1
+            if epochs_without_improvement > patience:
+                print(f"Early stopping at epoch {epoch+1}")
+                break
+
+    print(f"Chosen model - val_t2i_mean_recall: {best_t2i_recall:.4f} - val_recall@k: {best_recall}")
+    return train_loss_list, val_loss_list, val_recall_list
+
 def train_one_epoch(device, model, optimizer, train_loader):
     model.train()
     running_loss = 0.0
@@ -95,7 +121,10 @@ def train_one_epoch(device, model, optimizer, train_loader):
 
         logit_scale = model.logit_scale.exp()
 
-        sample_weights = batch["sample_weights"].to(device)
+        sample_weights = batch.get("sample_weights")
+        if sample_weights is not None:
+            sample_weights = sample_weights.to(device)
+
         loss = contrastive_loss(image_embeds, text_embeds, logit_scale, sample_weights)
         loss.backward()
 

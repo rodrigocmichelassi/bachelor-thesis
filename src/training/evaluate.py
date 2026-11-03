@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
+from src.training.loss import contrastive_loss
 from sklearn.metrics import accuracy_score, balanced_accuracy_score, classification_report, confusion_matrix
 
 # evaluate_classifier calculates the cosine similarity between
@@ -70,6 +71,8 @@ def evaluate_retrieval(model, test_loader, device, ks=(1, 5, 10), debug_oracle=F
     model.eval()
 
     img_embs, txt_embs, ids = [], [], []
+
+    running_loss = 0.0
     with torch.no_grad():
         for batch in test_loader:
             image_embeds = model.get_image_features(pixel_values=batch["pixel_values"].to(device))
@@ -77,6 +80,8 @@ def evaluate_retrieval(model, test_loader, device, ks=(1, 5, 10), debug_oracle=F
                 input_ids=batch["input_ids"].to(device),
                 attention_mask=batch["attention_mask"].to(device),
             )
+            running_loss += contrastive_loss(image_embeds, text_embeds, model.logit_scale.exp()).item()
+
             img_embs.append(F.normalize(image_embeds, dim=-1))
             txt_embs.append(F.normalize(text_embeds, dim=-1))
             ids.extend(batch["image_ids"])
@@ -110,10 +115,12 @@ def evaluate_retrieval(model, test_loader, device, ks=(1, 5, 10), debug_oracle=F
 
     # image -> text hits if any of the captions is in the top K
     # text -> image hits if the corresponding image to the caption is in the top K (harder)
-    return {
+    results = {
         "i2t": {k: i2t_hits[:, :k].any(dim=1).float().mean().item() for k in ks},   # dict with Recall@K -> {1: 0.12, 5: 0.35, 10: 0.48}
         "t2i": {k: t2i_hits[:, :k].any(dim=1).float().mean().item() for k in ks},
     }
+
+    return results, running_loss / len(test_loader)
 
 # mean_recall calculates the mean between i2t and t2i Recall@K results
 def mean_recall(results):
@@ -121,7 +128,7 @@ def mean_recall(results):
     return sum(values) / len(values)
 
 # show_retrieval_metrics prints Recall@K in different formats
-def show_retrieval_metrics(recall_at_K, ks=(1,5,10)):
+def show_retrieval_metrics(recall_at_K, loss, ks=(1,5,10)):
     mean_recall_value = mean_recall(recall_at_K)
     i2t = recall_at_K['i2t']
     t2i = recall_at_K['t2i']
@@ -130,6 +137,7 @@ def show_retrieval_metrics(recall_at_K, ks=(1,5,10)):
     t2i_mean = np.array(list(t2i.values())).mean()
     
     print("\n-*-*- Test results -*-*-\n")
+    print(f"Testing Loss: {loss}")
     print(f"Recall@K for K={ks}: {recall_at_K}")
     print(f"Image->Text Recall@K Mean: {i2t_mean}")
     print(f"Text->Image Recall@K Mean: {t2i_mean}")

@@ -18,10 +18,18 @@ def set_seed(seed):
     torch.backends.cudnn.benchmark = False
 
 def get_run_checkpoint_path(args, base_dir=MODELS_DIR):
-    chosen_model = 'classifier' if args.training_mode == 'classifier' else 'retrieval'
+    wc = ''
+    retrieval_mode = ''
+
+    chosen_model = args.training_mode
+    if chosen_model == 'classifier':
+        wc = f'_wc_{args.weight_classes}'
+    if chosen_model == 'retrieval':
+        retrieval_mode = args.retrieval_mode
  
-    run_name = f"lr_{args.lr}_l2_{args.l2}_wc_{args.weight_classes}"
-    return base_dir / f"clip_weights/{chosen_model}" / run_name
+    run_name = f"lr_{args.lr}_l2_{args.l2}{wc}"
+
+    return base_dir / "clip_weights" / chosen_model / retrieval_mode / run_name
 
 def log_zero_shot_results(acc, loss, bal_acc, cm, report):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -49,7 +57,7 @@ def log_zero_shot_results(acc, loss, bal_acc, cm, report):
         f.write(f"Classification Report:\n{report}\n")
         f.write(f"Confusion Matrix:\n{cm}\n")
 
-def plot_training_evolution(args, train_acc, train_loss, val_acc, val_loss):
+def plot_acc_loss_evolution(args, train_acc, train_loss, val_acc, val_loss):
     save_path = PLOTS_DIR
     epochs = range(1, len(train_acc) + 1)
 
@@ -75,11 +83,43 @@ def plot_training_evolution(args, train_acc, train_loss, val_acc, val_loss):
 
     plt.tight_layout()
 
-    save_dir = PLOTS_DIR / f"wc{args.weight_classes}"
+    save_dir = PLOTS_DIR / f"classifier/wc_{args.weight_classes}"
     
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
     save_dir.mkdir(parents=True, exist_ok=True)
     
+    save_path = save_dir / f"lr_{args.lr}_l2_{args.l2}.png"
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+
+    plt.close(fig)
+
+def plot_retrieval_evolution(args, train_loss, val_loss, val_recalls):
+    epochs = range(1, len(train_loss) + 1)
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+    axes[0].plot(epochs, train_loss, label="Train loss", marker="o")
+    axes[0].plot(epochs, val_loss, label="Validation loss", marker="o")
+    axes[0].set_title(f"Loss Evolution - lr: {args.lr}, l2: {args.l2}")
+
+    for k in (1, 5, 10):
+        axes[1].plot(epochs, [r["t2i"][k] for r in val_recalls], label=f"t2i Recall@{k}", marker="o")
+    axes[1].plot(epochs, [sum(r["t2i"].values()) / 3 for r in val_recalls],
+                 label="t2i mean", linewidth=3, color="black")
+    axes[1].set_title(f"Validation Recall@K (text to image) - lr: {args.lr}, l2: {args.l2}")
+
+    for ax in axes:
+        ax.set_xlabel("Epoch")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+
+    run_mode = args.retrieval_mode
+    save_dir = PLOTS_DIR / f"retrieval/{run_mode}"
+        
+    PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+    save_dir.mkdir(parents=True, exist_ok=True)
+
     save_path = save_dir / f"lr_{args.lr}_l2_{args.l2}.png"
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
 

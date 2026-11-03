@@ -1,3 +1,5 @@
+import random
+
 # Returns natural language optic disc side in the image description
 # Parameters
 # - od_side: [0,1] value describing the side of the optic disc in the image
@@ -224,47 +226,50 @@ def generate_anatomy_prompt(row):
 # Parameters
 # - row: processed brset dataframe row with retinal annotations
 def generate_combined_prompt(row):
-    ag, _, nd, td, ee, _ = get_anatomy_information(row)
-
-    macula_visibility = get_macula_visibility(
-        row['fovea_detection_confidence']
-    )
-
-    focus_information = get_focus_information(
-        row['focus']
-    )
-
-    illumination_information = get_illumination_information(
-        row['iluminaton']
-    )
+    fine_quality_values = {
+        'good visibility',
+        'clearly visible',
+        'image with adequate focus',
+        'image with adequate illumination',
+    }
 
     disease_caption_columns = [
-        'healthy',
-        'diabetic_retinopathy',
-        'macular_edema',
-        'scar',
-        'nevus',
-        'amd',
-        'vascular_occlusion',
-        'hypertensive_retinopathy',
-        'drusens',
-        'hemorrhage',
-        'myopic_fundus',
-        'increased_cup_disc'
-    ]
+            'healthy',
+            'diabetic_retinopathy',
+            'macular_edema',
+            'scar',
+            'nevus',
+            'amd',
+            'vascular_occlusion',
+            'hypertensive_retinopathy',
+            'drusens',
+            'hemorrhage',
+            'myopic_fundus',
+            'increased_cup_disc',
+            'other_abnormalities'
+        ]
+    
+    ag, _, nd, td, ee, _ = get_anatomy_information(row)
 
-    findings = [
-        col
-        for col in disease_caption_columns
-        if row[col] == 1
+    quality_observations = [
+        get_macula_visibility(row['fovea_detection_confidence']),
+        get_focus_information(row['focus']),
+        get_illumination_information(row['iluminaton']),
     ]
+    quality_problems = [q for q in quality_observations if q not in fine_quality_values]
 
+    findings = [col for col in disease_caption_columns if row[col] == 1]
     if len(findings) == 0:
         findings = ["healthy"]
 
     disease_metadata = "\n".join(
         f"- {finding}" for finding in findings
     )
+
+    quality_block = ""
+    if quality_problems:
+        quality_lines = "\n".join(f"    - {q}" for q in quality_problems)
+        quality_block = f"\n    Image quality problems:\n{quality_lines}\n"
 
     prompt = f"""
     Generate a single caption describing a retinal photograph.
@@ -278,34 +283,50 @@ def generate_combined_prompt(row):
     - {td}
     - {ee}
 
-    Image quality observations:
-    - {macula_visibility}
-    - {focus_information}
-    - {illumination_information}
+    {quality_block}
 
     Rules:
-    - Combine disease, anatomy, and image quality information.
-    - Mention only information explicitly provided.
-    - Do not infer diagnoses or diseases not explicitly provided.
-    - Describe findings only.
-    - Do not explain findings.
-    - Do not interpret findings.
+    - Include every disease finding and every anatomical observation listed.
+    - Mention only information explicitly provided; do not mention image quality unless it is listed.
+    - Describe only the listed findings; do not explain, interpret, or suggest diagnoses.
     - Do not suggest, indicate, imply, correlate with, or raise suspicion for any disease.
-    - Do not use synonyms for diseases.
-    - Do not rephrase disease names.
+    - Do not use synonyms for diseases or rephrase disease names.
     - Do not describe severity for diseases unless explicitly provided.
     - Do not mention numerical measurements.
-    - Keep the caption concise.
     - Write naturally as if describing a retinal fundus photograph.
-    - Use no more than 25 words.
-    - Prioritize disease findings when present.
-    - Only include quality observations if there is an explicit quality issue in the image.
-        - Omit macula visibility, focus and illumination information whenever it is 'fine', 'good', 'clear', 'adequate'.
+    - Use no more than 40 words.
 
     Return exactly one sentence.
     """
 
     return prompt
+
+def postprocess_caption(caption, is_healthy):
+    if is_healthy and 'healthy' not in caption.lower():
+        caption = random.choice([
+            "Healthy retina. ", 
+            "Healthy retinal photograph. ", 
+            "Healthy retinal image. ", 
+            "Healthy eye. "
+        ]) + caption
+    return caption
+
+def caption_is_bad(caption):
+    low = caption.lower()
+    return ("both eyes" in low or ("left" in low and "right" in low)
+            or "due to" in low or "consistent with" in low)
+
+def generate_valid_caption(prompt, system_prompt, is_healthy, model, tokenizer, tries=3):
+    for _ in range(tries):
+        caption = generate_image_caption(prompt, system_prompt, model, tokenizer)
+        low = caption.lower()
+        if "due to" in low or ("left" in low and "right" in low):
+            continue
+        if is_healthy and "healthy" not in low:
+            continue
+        if not caption_is_bad(caption):
+            return postprocess_caption(caption, is_healthy)
+    return postprocess_caption(caption, is_healthy)   # keep the last attempt after 3 tries
 
 # Takes a prompt to generate captions for an image
 # Parameters
@@ -327,10 +348,11 @@ def generate_image_caption(prompt, system_prompt, model, tokenizer):
 
     generated_ids = model.generate(
         **model_inputs,
-        max_new_tokens=64,
+        max_new_tokens=80,
         do_sample=True,
-        temperature=1.0,
+        temperature=0.7,
         top_p=0.95,
+        num_return_sequences=3,
         pad_token_id=tokenizer.eos_token_id
     )
     generated_ids = [
