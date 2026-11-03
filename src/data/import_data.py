@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 from functools import partial
 
 from src.utils.helper import get_retrieval_dataset
-from src.config import SR_RETRIEVAL_CAPTIONS_CSV, MR_RETRIEVAL_CAPTIONS_CSV, CLASSIFICATION_CAPTIONS_CSV, IMAGES_DIR
+from src.config import SR_RETRIEVAL_CAPTIONS_CSV, MR_RETRIEVAL_CAPTIONS_CSV, COMBINED_RETRIEVAL_CAPTIONS_CSV, CLASSIFICATION_CAPTIONS_CSV, IMAGES_DIR
 from src.dataset import RetinalClassCaptionDataset, SingleRowRetrievalDataset, MultiRowRetrievalDataset
 
 # seed_worker sets a seed for pytorch dataloader workers
@@ -22,9 +22,9 @@ def get_captions_mode(args):
         return 'classifier'
     return 'retrieval'
 
-# cls_collretrieval_collate_fnate_fn turns the list of samples into pre-processed tensor batches
+# retrieval_collate_fn turns the list of samples into pre-processed tensor batches
 def retrieval_collate_fn(batch, processor):
-    images, texts, image_ids = zip(*batch)
+    images, texts, image_ids = zip(*(sample[:3] for sample in batch))
     
     inputs = processor(
         text=list(texts),
@@ -34,6 +34,8 @@ def retrieval_collate_fn(batch, processor):
     )
 
     inputs["image_ids"] = list(image_ids)
+    if len(batch[0]) == 4:  # adds the group_ids in the combined captions case
+        inputs["group_ids"] = torch.tensor([sample[3] for sample in batch], dtype=torch.long)
     return inputs
 
 # cls_collate_fn turns the list of samples into pre-processed tensor batches
@@ -73,7 +75,7 @@ def get_dataloaders(args, train_dataset, test_dataset, val_dataset, class_weight
 
     train_loader = DataLoader(
         train_dataset,
-        batch_size=256,
+        batch_size=args.batch_size,
         shuffle=True,
         collate_fn=train_collate,
         num_workers=16,
@@ -84,7 +86,7 @@ def get_dataloaders(args, train_dataset, test_dataset, val_dataset, class_weight
 
     test_loader = DataLoader(
         test_dataset,
-        batch_size=256,
+        batch_size=args.batch_size,
         shuffle=False,
         collate_fn=eval_collate,
         num_workers=16,
@@ -93,7 +95,7 @@ def get_dataloaders(args, train_dataset, test_dataset, val_dataset, class_weight
 
     val_loader = DataLoader(
         val_dataset,
-        batch_size=256,
+        batch_size=args.batch_size,
         shuffle=False,
         collate_fn=eval_collate,
         num_workers=16,
@@ -201,8 +203,18 @@ def import_data(args, debug=False):
         if args.retrieval_mode == '':
             raise ValueError('Provide a retrieval mode in the parameters.')
         
-        captions_df = pd.read_csv(SR_RETRIEVAL_CAPTIONS_CSV) \
-            if args.retrieval_mode == 'single_row' else pd.read_csv(MR_RETRIEVAL_CAPTIONS_CSV)
+        paths = {
+            'single_row': SR_RETRIEVAL_CAPTIONS_CSV,
+            'multi_row': MR_RETRIEVAL_CAPTIONS_CSV,
+            'combined_captions': COMBINED_RETRIEVAL_CAPTIONS_CSV,
+        }
+
+        if args.retrieval_mode not in paths:
+            raise ValueError(f"Unknown retrieval mode: {args.retrieval_mode}")
+        captions_df = pd.read_csv(paths[args.retrieval_mode])
+        if args.retrieval_mode == 'combined_captions':
+            # Encode to integer once before splitting, so a key has the same ID in all splits (train, test, val).
+            captions_df['group_id'] = pd.factorize(captions_df['group_key'], sort=True)[0]
         
         return import_retrieval_data(args, captions_df)
         

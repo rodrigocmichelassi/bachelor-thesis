@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
-from src.training.loss import contrastive_loss
+from src.training.loss import contrastive_loss, retrieval_loss_ids
 from sklearn.metrics import accuracy_score, balanced_accuracy_score, classification_report, confusion_matrix
 
 # evaluate_classifier calculates the cosine similarity between
@@ -66,7 +66,8 @@ def evaluate_classifier(model, processor, test_loader, class_labels, device, deb
     return true_labels, predicted_labels, loss
 
 # evaluate_retrieval evaluates CLIP's performance on image retrieval
-def evaluate_retrieval(model, test_loader, device, ks=(1, 5, 10), debug_oracle=False):
+def evaluate_retrieval(model, test_loader, device, ks=(1, 5, 10), debug_oracle=False,
+                       mask_same_group=False):
     model.to(device)
     model.eval()
 
@@ -80,7 +81,10 @@ def evaluate_retrieval(model, test_loader, device, ks=(1, 5, 10), debug_oracle=F
                 input_ids=batch["input_ids"].to(device),
                 attention_mask=batch["attention_mask"].to(device),
             )
-            running_loss += contrastive_loss(image_embeds, text_embeds, model.logit_scale.exp()).item()
+            running_loss += contrastive_loss(
+                image_embeds, text_embeds, model.logit_scale.exp(),
+                **retrieval_loss_ids(batch, device, mask_same_group)
+            ).item()
 
             img_embs.append(F.normalize(image_embeds, dim=-1))
             txt_embs.append(F.normalize(text_embeds, dim=-1))
