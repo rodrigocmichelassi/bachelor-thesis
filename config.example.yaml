@@ -4,6 +4,7 @@ paths:
 
 data:
   brset_labels_csv: brset_df.csv
+  combined_captions_csv: combined_retrieval_captions.csv
   sr_retrieval_captions_csv: sr_retrieval_captions.csv
   mr_retrieval_captions_csv: mr_retrieval_captions.csv
   classification_captions_csv: classification_captions.csv
