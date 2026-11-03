@@ -41,6 +41,14 @@ class MultiRowRetrievalDataset(Dataset):
 
         return image, caption, row["image_id"]
 
+class CombinedCaptionRetrievalDataset(MultiRowRetrievalDataset):
+    """One caption per image, with the annotation group carried to the loss."""
+
+    def __getitem__(self, idx):
+        image, caption, image_id = super().__getitem__(idx)
+        return image, caption, image_id, int(self.captions.iloc[idx]["group_id"])
+
+
 class RetinalClassCaptionDataset(Dataset):
     def __init__(self, captions, image_dir):
         self.captions = captions.reset_index(drop=True)

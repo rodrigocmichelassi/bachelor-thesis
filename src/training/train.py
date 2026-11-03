@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 # from tqdm import tqdm
-from src.training.loss import contrastive_loss
+from src.training.loss import contrastive_loss, retrieval_loss_ids
 from src.training.evaluate import evaluate_classifier, evaluate_retrieval
 from src.utils.helper import get_run_checkpoint_path
 
@@ -74,12 +74,15 @@ def train_retrieval(args, device, model, train_loader, val_loader):
     checkpoint_path = get_run_checkpoint_path(args)
 
     train_loss_list, val_loss_list, val_recall_list = [], [], []
+    mask_same_group = args.mask_same_group
 
     for epoch in range(args.epochs):
-        train_loss = train_one_epoch(device, model, optimizer, train_loader)
+        train_loss = train_one_epoch(device, model, optimizer, train_loader,
+                                     mask_same_group=mask_same_group)
 
-        val_recall, val_loss = evaluate_retrieval(model, val_loader, device)
-        t2i_recall = val_t2i_mean_recall(val_recall)   # get text-to-image recall for early stopping
+        val_recall, val_loss = evaluate_retrieval(model, val_loader, device,
+                                                 mask_same_group=mask_same_group)
+        t2i_recall = val_t2i_mean_recall(val_recall)
 
         train_loss_list.append(train_loss)
         val_loss_list.append(val_loss)
@@ -105,7 +108,7 @@ def train_retrieval(args, device, model, train_loader, val_loader):
     print(f"Chosen model - val_t2i_mean_recall: {best_t2i_recall:.4f} - val_recall@k: {best_recall}")
     return train_loss_list, val_loss_list, val_recall_list
 
-def train_one_epoch(device, model, optimizer, train_loader):
+def train_one_epoch(device, model, optimizer, train_loader, mask_same_group=False):
     model.train()
     running_loss = 0.0
 
@@ -125,7 +128,8 @@ def train_one_epoch(device, model, optimizer, train_loader):
         if sample_weights is not None:
             sample_weights = sample_weights.to(device)
 
-        loss = contrastive_loss(image_embeds, text_embeds, logit_scale, sample_weights)
+        loss = contrastive_loss(image_embeds, text_embeds, logit_scale, sample_weights,
+                                **retrieval_loss_ids(batch, device, mask_same_group))
         loss.backward()
 
         optimizer.step()

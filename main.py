@@ -45,7 +45,8 @@ def run_zero_shot(args, test_loader, log_results=False):
             log_zero_shot_results(acc, loss, bal_acc, cm, report)
         
     elif args.zero_shot_mode == 'retrieval':
-        recall_at_k, loss = evaluate_retrieval(model, test_loader, device)
+        recall_at_k, loss = evaluate_retrieval(model, test_loader, device,
+                                             mask_same_group=args.mask_same_group)
         show_retrieval_metrics(recall_at_k, loss)
     
     else:
@@ -98,13 +99,14 @@ def evaluate_retrieval_model(args, test_loader):
     checkpoint_path = get_run_checkpoint_path(args)
 
     model, _ = load_fine_tuned_clip(checkpoint_path)
-    recall_at_k, test_loss = evaluate_retrieval(model, test_loader, device)
+    recall_at_k, test_loss = evaluate_retrieval(model, test_loader, device,
+                                              mask_same_group=args.mask_same_group)
     show_retrieval_metrics(recall_at_k, test_loss)
 
 def main(args):
     set_seed(args.seed)
     train_loader, test_loader, val_loader = import_data(args)
-    
+
     if args.training_mode == 'zero_shot':
         run_zero_shot(args, test_loader, log_results=True)
 
@@ -132,6 +134,8 @@ if __name__ == '__main__':
     parser.add_argument('--training_mode', type=str, default='retrieval', help='One of: {zero_shot, retrieval, classifier}')
     parser.add_argument('--zero_shot_mode', type=str, default='retrieval', help='One of: {classifier, retrieval}')
     parser.add_argument('--retrieval_mode', type=str, default='single_row', help='Which dataset to use for image retrieval training. One of: {single_row, multi_row, combined_captions}')
+    parser.add_argument('--mask_same_group', action='store_true', help='Combined captions only: ignore same-group and identical-token captions as loss negatives')
+    parser.add_argument('--batch_size', type=int, default=256, help='Train and evaluation batch size')
     parser.add_argument('--evaluate_classifier', type=int, default=0, help='Run *only* evaluation, model chosen based on lr and l2 weights')
 
     args = parser.parse_args()

@@ -1,13 +1,25 @@
 import os
 import json
+import hashlib
 import torch
 import random
 import numpy as np
 from pathlib import Path
 from datetime import datetime
 from matplotlib import pyplot as plt
-from src.config import MODELS_DIR, PLOTS_DIR, IMAGES_DIR
-from src.dataset import SingleRowRetrievalDataset, MultiRowRetrievalDataset
+from src.config import MODELS_DIR, PLOTS_DIR, IMAGES_DIR, COMBINED_RETRIEVAL_CAPTIONS_CSV, PROJECT_ROOT
+from src.dataset import SingleRowRetrievalDataset, MultiRowRetrievalDataset, CombinedCaptionRetrievalDataset
+
+def get_run_suffix(args, wc=''):
+    """Keep historical default paths; distinguish new experimental settings."""
+    suffix = f'lr_{args.lr}_l2_{args.l2}{wc}'
+    if args.mask_same_group:
+        suffix += '_group_mask'
+    if args.batch_size != 256:
+        suffix += f'_bs_{args.batch_size}'
+    if args.seed != 42:
+        suffix += f'_seed_{args.seed}'
+    return suffix
 
 def set_seed(seed):
     random.seed(seed)
@@ -27,7 +39,7 @@ def get_run_checkpoint_path(args, base_dir=MODELS_DIR):
     if chosen_model == 'retrieval':
         retrieval_mode = args.retrieval_mode
  
-    run_name = f"lr_{args.lr}_l2_{args.l2}{wc}"
+    run_name = get_run_suffix(args, wc=wc)
 
     return base_dir / "clip_weights" / chosen_model / retrieval_mode / run_name
 
@@ -88,7 +100,7 @@ def plot_acc_loss_evolution(args, train_acc, train_loss, val_acc, val_loss):
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
     save_dir.mkdir(parents=True, exist_ok=True)
     
-    save_path = save_dir / f"lr_{args.lr}_l2_{args.l2}.png"
+    save_path = save_dir / f"{get_run_suffix(args)}.png"
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
 
     plt.close(fig)
@@ -120,7 +132,7 @@ def plot_retrieval_evolution(args, train_loss, val_loss, val_recalls):
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    save_path = save_dir / f"lr_{args.lr}_l2_{args.l2}.png"
+    save_path = save_dir / f"{get_run_suffix(args)}.png"
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
 
     plt.close(fig)
@@ -146,8 +158,12 @@ def get_retrieval_dataset(args, train_df, test_df, val_df):
         train_ds = MultiRowRetrievalDataset(train_df, IMAGES_DIR)
         test_ds = MultiRowRetrievalDataset(test_df, IMAGES_DIR)
         val_ds = MultiRowRetrievalDataset(val_df, IMAGES_DIR)
+    elif args.retrieval_mode == 'combined_captions':
+        train_ds = CombinedCaptionRetrievalDataset(train_df, IMAGES_DIR)
+        test_ds = CombinedCaptionRetrievalDataset(test_df, IMAGES_DIR)
+        val_ds = CombinedCaptionRetrievalDataset(val_df, IMAGES_DIR)
     else:
-        raise ValueError('--retrieval_mode is one of {single_row, multi_row}.')
+        raise ValueError('--retrieval_mode is one of {single_row, multi_row, combined_captions}.')
 
     return train_ds, test_ds, val_ds
 
