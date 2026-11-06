@@ -1,15 +1,23 @@
-import os
 import json
-import hashlib
 import torch
 import random
 import numpy as np
 from pathlib import Path
 from datetime import datetime
 from matplotlib import pyplot as plt
+from matplotlib.ticker import PercentFormatter
 from src.config import MODELS_DIR, PLOTS_DIR, IMAGES_DIR, COMBINED_RETRIEVAL_CAPTIONS_CSV, PROJECT_ROOT
 from src.dataset import SingleRowRetrievalDataset, MultiRowRetrievalDataset, CombinedCaptionRetrievalDataset
 
+# get_retrieval_match_mode returns the captions match mode used for image retrieval.
+# `group_text` is used for combined captions, in which the metrics are calculated
+# using group-aware metrics. Exact is used for single row captions, in which the
+# metrics are calculated as the exact text-image match retrieval.
+def get_retrieval_match_mode(args):
+    return 'group_text' if args.retrieval_mode == 'combined_captions' else 'exact'
+
+# get_run_suffix returns a suffix string for the run name. It is used to plot
+# charts and obtain the weights checkpoint
 def get_run_suffix(args, wc=''):
     """Keep historical default paths; distinguish new experimental settings."""
     suffix = f'lr_{args.lr}_l2_{args.l2}{wc}'
@@ -19,8 +27,13 @@ def get_run_suffix(args, wc=''):
         suffix += f'_bs_{args.batch_size}'
     if args.seed != 42:
         suffix += f'_seed_{args.seed}'
+    match_mode = get_retrieval_match_mode(args) if args.training_mode == 'retrieval' else 'exact'
+    if match_mode != 'exact':
+        # Retain the existing filename convention for saved experiments.
+        suffix += f'_relevance_{match_mode}'
     return suffix
 
+#  set_seed sets a default seed value for training reproducibility
 def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
@@ -107,19 +120,34 @@ def plot_acc_loss_evolution(args, train_acc, train_loss, val_acc, val_loss):
 
 def plot_retrieval_evolution(args, train_loss, val_loss, val_recalls):
     epochs = range(1, len(train_loss) + 1)
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    loss_ax, success_ax, precision_ax, recall_ax = axes.flat
 
-    axes[0].plot(epochs, train_loss, label="Train loss", marker="o")
-    axes[0].plot(epochs, val_loss, label="Validation loss", marker="o")
-    axes[0].set_title(f"Loss Evolution - lr: {args.lr}, l2: {args.l2}")
+    loss_ax.plot(epochs, train_loss, label="Train loss", marker="o")
+    loss_ax.plot(epochs, val_loss, label="Validation loss", marker="o")
+    loss_ax.set_title("Contrastive loss")
+    loss_ax.set_ylabel("Loss")
 
-    for k in (1, 5, 10):
-        axes[1].plot(epochs, [r["t2i"][k] for r in val_recalls], label=f"t2i Recall@{k}", marker="o")
-    axes[1].plot(epochs, [sum(r["t2i"].values()) / 3 for r in val_recalls],
-                 label="t2i mean", linewidth=3, color="black")
-    axes[1].set_title(f"Validation Recall@K (text to image) - lr: {args.lr}, l2: {args.l2}")
+    metric_panels = [
+        (success_ax, "Recall@K", [r["recall"]["t2i"] for r in val_recalls]),
+        (precision_ax, "Precision@K", [r["precision"]["t2i"] for r in val_recalls]),
+        (recall_ax, "SetRecall@K", [r["set_recall"]["t2i"] for r in val_recalls]),
+    ]
+    for ax, title, history in metric_panels:
+        for k in (1, 5, 10):
+            ax.plot(epochs, [metrics[k] for metrics in history], label=f"K={k}", marker="o")
+        ax.set_title(title)
+        ax.set_ylim(0, 1)
+        ax.yaxis.set_major_formatter(PercentFormatter(xmax=1))
 
-    for ax in axes:
+    success_ax.plot(epochs, [sum(r["recall"]["t2i"].values()) / len(r["recall"]["t2i"]) for r in val_recalls],
+                    label="Mean (checkpoint selection)", linewidth=3, color="black")
+    match_mode = get_retrieval_match_mode(args)
+    loss_mode = "masked" if args.mask_same_group else "unmasked"
+    fig.suptitle(f"Metrics Evolution - lr: {args.lr}, l2: {args.l2}\n"
+                 f"Text-to-image validation ({match_mode}, {loss_mode} loss)")
+
+    for ax in axes.flat:
         ax.set_xlabel("Epoch")
         ax.legend()
         ax.grid(True, alpha=0.3)

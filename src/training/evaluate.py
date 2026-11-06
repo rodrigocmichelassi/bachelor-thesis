@@ -26,7 +26,7 @@ def evaluate_classifier(model, processor, test_loader, class_labels, device, deb
 
     if debug:
         text_similarity = text_embeds @ text_embeds.T  # [13, 13]
-        print(text_similarity) 
+        print(text_similarity)
 
     true_labels = []
     predicted_labels = []
@@ -65,13 +65,58 @@ def evaluate_classifier(model, processor, test_loader, class_labels, device, deb
 
     return true_labels, predicted_labels, loss
 
-# evaluate_retrieval evaluates CLIP's performance on image retrieval
+def retrieval_metrics(i2t_top_k, t2i_top_k, relevance, ks):
+    """Score fixed rankings against an image-by-caption relevance matrix.
+
+    Recall@K: Out of the K images, is any of them relevant?
+    Precision@K: What percentage of the returned images are relevant
+    Set Recall@K: What percentage of the relevant images was returned?
+
+    If K exceeds the candidate count, precision uses the number actually
+    returned, min(K, number of candidates).
+    """
+    results = {metric: {"i2t": {}, "t2i": {}}
+               for metric in ("recall", "precision", "set_recall")}
+    for direction, top_k, relevant in (("i2t", i2t_top_k, relevance),
+                                      ("t2i", t2i_top_k, relevance.T)):
+        hits = relevant.gather(1, top_k)
+        relevant_count = relevant.sum(dim=1)
+        for k in ks:
+            found = hits[:, :k].sum(dim=1).float()
+            returned = min(k, relevant.shape[1])
+
+            results["recall"][direction][k] = (found > 0).float().mean().item()
+            results["precision"][direction][k] = (found / returned).mean().item()
+            results["set_recall"][direction][k] = (found / relevant_count).mean().item()
+    return results
+
+def add_identical_caption_relevance(matches, caption_to_img, token_sequences):
+    """Add direct matches through identical caption tokens across the full split.
+
+    Batch-local text IDs cannot be compared across batches. Instead, token tuples
+    identify equal captions globally. No transitive merging of groups is done.
+    """
+    by_text = {}
+    for caption_index, tokens in enumerate(token_sequences):
+        by_text.setdefault(tokens, []).append(caption_index)
+    result = matches.clone()
+    for columns in by_text.values():
+        if len(columns) > 1:
+            columns = torch.tensor(columns, device=matches.device)
+            images = caption_to_img[columns].unique()
+            result[images[:, None], columns[None, :]] = True
+    return result
+
+
+# Embeddings and rankings cover the complete evaluation split, not each batch.
 def evaluate_retrieval(model, test_loader, device, ks=(1, 5, 10), debug_oracle=False,
-                       mask_same_group=False):
+                       mask_same_group=False, retrieval_match_mode="exact"):
     model.to(device)
     model.eval()
-
     img_embs, txt_embs, ids = [], [], []
+    group_ids, token_sequences = [], []
+    if retrieval_match_mode not in ("exact", "group_text"):
+        raise ValueError(f"Unknown retrieval match mode: {retrieval_match_mode}")
 
     running_loss = 0.0
     with torch.no_grad():
@@ -88,64 +133,98 @@ def evaluate_retrieval(model, test_loader, device, ks=(1, 5, 10), debug_oracle=F
 
             img_embs.append(F.normalize(image_embeds, dim=-1))
             txt_embs.append(F.normalize(text_embeds, dim=-1))
+
             ids.extend(batch["image_ids"])
 
-    img_embs = torch.cat(img_embs)   # one row per (image, caption) pair
-    txt_embs = torch.cat(txt_embs)
+            if retrieval_match_mode != "exact":
+                if "group_ids" not in batch:
+                    raise ValueError("Group-aware evaluation requires group_ids; use exact matching for datasets without groups.")
+                group_ids.extend(batch["group_ids"].tolist())
+            if retrieval_match_mode == "group_text":
+                tokens = batch["input_ids"].detach().cpu()
+                attention = batch["attention_mask"].detach().cpu().bool()
+                token_sequences.extend(tuple(row[mask].tolist()) for row, mask in zip(tokens, attention))
 
+    img_embs, txt_embs = torch.cat(img_embs), torch.cat(txt_embs)
     if debug_oracle:
         img_embs = txt_embs.clone()
 
-    # Keep the first embedding per unique image (each image appears 3x)
+    # Keep one embedding per image, including modes with several captions/image.
     first_row = {}
     for i, img_id in enumerate(ids):
         first_row.setdefault(img_id, i)
-    unique_ids = list(first_row.keys())
-    unique_img_embs = img_embs[[first_row[i] for i in unique_ids]]
 
+    unique_ids = list(first_row)
+    first_indices = list(first_row.values())
+    unique_img_embs = img_embs[first_indices]
     img_index = {img_id: n for n, img_id in enumerate(unique_ids)}
-    caption_to_img = torch.tensor([img_index[i] for i in ids], device=device)  # [N_captions]
+    caption_to_img = torch.tensor([img_index[i] for i in ids], device=device)
 
-    similarity = unique_img_embs @ txt_embs.T   # [N_images, N_captions]
-    max_k = max(ks)
+    similarity = unique_img_embs @ txt_embs.T
 
-    # image -> text: hit if ANY of the image's captions is in the top K
-    i2t_top = similarity.topk(max_k, dim=1).indices # retrieve the top K captions
-    i2t_hits = caption_to_img[i2t_top] == torch.arange(similarity.shape[0], device=device).unsqueeze(1) # [N_images, max_k] boolean matrix
+    i2t_top_k = similarity.topk(min(max(ks), similarity.shape[1]), dim=1).indices
+    t2i_top_k = similarity.T.topk(min(max(ks), similarity.shape[0]), dim=1).indices
 
-    # text -> image: hit if the caption's image is in the top K
-    t2i_top = similarity.T.topk(max_k, dim=1).indices # retrieve the top K images
-    t2i_hits = t2i_top == caption_to_img.unsqueeze(1)
+    image_indices = torch.arange(len(unique_ids), device=device)
 
-    # image -> text hits if any of the captions is in the top K
-    # text -> image hits if the corresponding image to the caption is in the top K (harder)
+    # boolean matrix, to which image each caption belongs to
+    # rows: images; columns: captions
+    exact_matches = image_indices[:, None] == caption_to_img[None, :]
     results = {
-        "i2t": {k: i2t_hits[:, :k].any(dim=1).float().mean().item() for k in ks},   # dict with Recall@K -> {1: 0.12, 5: 0.35, 10: 0.48}
-        "t2i": {k: t2i_hits[:, :k].any(dim=1).float().mean().item() for k in ks},
+        "loss": running_loss / len(test_loader),
+        "exact": retrieval_metrics(i2t_top_k, t2i_top_k, exact_matches, ks),
     }
 
-    return results, running_loss / len(test_loader)
+    if retrieval_match_mode != "exact":
+        caption_groups = torch.tensor(group_ids, device=device)
+        image_groups = caption_groups[first_indices]
+        group_matches = exact_matches | (image_groups[:, None] == caption_groups[None, :])
 
-# mean_recall calculates the mean between i2t and t2i Recall@K results
+        results["group"] = retrieval_metrics(i2t_top_k, t2i_top_k, group_matches, ks)
+        if retrieval_match_mode == "group_text":
+            group_text_matches = add_identical_caption_relevance(group_matches, caption_to_img, token_sequences)
+            results["group_text"] = retrieval_metrics(i2t_top_k, t2i_top_k, group_text_matches, ks)
+
+    return results
+
+# mean_recall returns the mean value between Recall@K,
+# for all K = {1, 5, 10}
 def mean_recall(results):
-    values = [v for direction in results.values() for v in direction.values()]
+    values = [value for direction in ("i2t", "t2i") for value in results["recall"][direction].values()]
     return sum(values) / len(values)
 
-# show_retrieval_metrics prints Recall@K in different formats
-def show_retrieval_metrics(recall_at_K, loss, ks=(1,5,10)):
-    mean_recall_value = mean_recall(recall_at_K)
-    i2t = recall_at_K['i2t']
-    t2i = recall_at_K['t2i']
-
-    i2t_mean = np.array(list(i2t.values())).mean()
-    t2i_mean = np.array(list(t2i.values())).mean()
-    
+# show_retrieval_metrics prints the metrics for both text-to-image
+# retrieval and image-to-text retrieval
+def show_retrieval_metrics(results, ks=(1, 5, 10)):
     print("\n-*-*- Test results -*-*-\n")
-    print(f"Testing Loss: {loss}")
-    print(f"Recall@K for K={ks}: {recall_at_K}")
-    print(f"Image->Text Recall@K Mean: {i2t_mean}")
-    print(f"Text->Image Recall@K Mean: {t2i_mean}")
-    print(f"Mean Recall: {mean_recall_value}")
+    print(f"Testing loss: {results['loss']:.4f}")
+
+    match_mode_dict = {
+        "exact": "exact match",
+        "group_text": "group match"
+    }
+
+    for match_mode in ("exact", "group_text"):
+        if match_mode not in results:
+            continue
+
+        metrics = results[match_mode]
+        print(f"\nMatch mode: {match_mode_dict[match_mode]}")
+
+        for direction, label in (("t2i", "Text -> Image"), ("i2t", "Image -> Text")):
+            print(f"\n{label}")
+            print(f"{'K':>4} {'Recall@K':>12} {'Precision@K':>14} {'Set Recall@K':>15}")
+
+            for k in ks:
+                recall = metrics["recall"][direction][k]
+                precision = metrics["precision"][direction][k]
+                set_recall = metrics["set_recall"][direction][k]
+                print(f"{k:>4} {recall:>12.2%} {precision:>14.2%} {set_recall:>15.2%}")
+
+            direction_mean = np.mean(list(metrics["recall"][direction].values()))
+            print(f"Mean Recall@K: {direction_mean:.2%}")
+
+        print(f"\nMean Recall@K (both directions): {mean_recall(metrics):.2%}")
 
 # calculate_classification_metrics calculates metrics for CLIP classification
 def calculate_classification_metrics(true_labels, pred_labels, class_labels, print_results=True):
