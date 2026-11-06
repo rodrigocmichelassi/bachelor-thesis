@@ -7,7 +7,7 @@ import warnings
 from src.data.import_data import import_data
 from src.training.train import train_classifier, train_retrieval
 from src.training.evaluate import evaluate_classifier, evaluate_retrieval, calculate_classification_metrics, show_retrieval_metrics
-from src.utils.helper import log_zero_shot_results, plot_acc_loss_evolution, plot_retrieval_evolution, get_run_checkpoint_path, set_seed
+from src.utils.helper import log_zero_shot_results, plot_acc_loss_evolution, plot_retrieval_evolution, get_run_checkpoint_path, set_seed, get_retrieval_match_mode
 from src.models.model import load_raw_clip_model, load_lora_clip, load_fine_tuned_clip
 
 warnings.filterwarnings("ignore", message="Could not find a config file")
@@ -45,9 +45,10 @@ def run_zero_shot(args, test_loader, log_results=False):
             log_zero_shot_results(acc, loss, bal_acc, cm, report)
         
     elif args.zero_shot_mode == 'retrieval':
-        recall_at_k, loss = evaluate_retrieval(model, test_loader, device,
-                                             mask_same_group=args.mask_same_group)
-        show_retrieval_metrics(recall_at_k, loss)
+        results = evaluate_retrieval(model, test_loader, device,
+                                             mask_same_group=args.mask_same_group,
+                                             retrieval_match_mode=get_retrieval_match_mode(args))
+        show_retrieval_metrics(results)
     
     else:
         raise ValueError(f"Invalid zero-shot evaluation mode!")
@@ -99,9 +100,10 @@ def evaluate_retrieval_model(args, test_loader):
     checkpoint_path = get_run_checkpoint_path(args)
 
     model, _ = load_fine_tuned_clip(checkpoint_path)
-    recall_at_k, test_loss = evaluate_retrieval(model, test_loader, device,
-                                              mask_same_group=args.mask_same_group)
-    show_retrieval_metrics(recall_at_k, test_loss)
+    results = evaluate_retrieval(model, test_loader, device,
+                                              mask_same_group=args.mask_same_group,
+                                              retrieval_match_mode=get_retrieval_match_mode(args))
+    show_retrieval_metrics(results)
 
 def main(args):
     set_seed(args.seed)
