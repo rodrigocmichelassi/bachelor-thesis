@@ -120,8 +120,9 @@ def plot_acc_loss_evolution(args, train_acc, train_loss, val_acc, val_loss):
 
 def plot_retrieval_evolution(args, train_loss, val_loss, val_recalls):
     epochs = range(1, len(train_loss) + 1)
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-    loss_ax, success_ax, precision_ax, recall_ax = axes.flat
+    fig, axes = plt.subplots(3, 2, figsize=(14, 14))
+    loss_ax, success_ax, precision_ax, recall_ax, map_ax, unused_ax = axes.flat
+    unused_ax.set_visible(False)
 
     loss_ax.plot(epochs, train_loss, label="Train loss", marker="o")
     loss_ax.plot(epochs, val_loss, label="Validation loss", marker="o")
@@ -142,12 +143,17 @@ def plot_retrieval_evolution(args, train_loss, val_loss, val_recalls):
 
     success_ax.plot(epochs, [sum(r["recall"]["t2i"].values()) / len(r["recall"]["t2i"]) for r in val_recalls],
                     label="Mean (checkpoint selection)", linewidth=3, color="black")
+    map_ax.plot(epochs, [r["map"]["t2i"] for r in val_recalls], label="Validation mAP", marker="o")
+    map_ax.set_title("mAP (full ranking)")
+    map_ax.set_ylim(0, 1)
+    map_ax.yaxis.set_major_formatter(PercentFormatter(xmax=1))
+    
     match_mode = get_retrieval_match_mode(args)
     loss_mode = "masked" if args.mask_same_group else "unmasked"
     fig.suptitle(f"Metrics Evolution - lr: {args.lr}, l2: {args.l2}\n"
                  f"Text-to-image validation ({match_mode}, {loss_mode} loss)")
 
-    for ax in axes.flat:
+    for ax in (loss_ax, success_ax, precision_ax, recall_ax, map_ax):
         ax.set_xlabel("Epoch")
         ax.legend()
         ax.grid(True, alpha=0.3)

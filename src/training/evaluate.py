@@ -65,18 +65,36 @@ def evaluate_classifier(model, processor, test_loader, class_labels, device, deb
 
     return true_labels, predicted_labels, loss
 
-def retrieval_metrics(i2t_top_k, t2i_top_k, relevance, ks):
+def mean_average_precision(ranking, matches):
+    """Full-ranking AP per query, averaged across queries (not truncated at K)."""
+    ranked_matches = matches.gather(1, ranking).float()
+
+    ranks = torch.arange(1, ranking.shape[1] + 1, device=ranking.device)
+
+    precision_at_rank = ranked_matches.cumsum(dim=1) / ranks
+    average_precision = (precision_at_rank * ranked_matches).sum(dim=1) / matches.sum(dim=1)
+
+    return average_precision.mean().item()
+
+def retrieval_metrics(i2t_top_k, t2i_top_k, relevance, ks, i2t_ranking, t2i_ranking):
     """Score fixed rankings against an image-by-caption relevance matrix.
 
     Recall@K: Out of the K images, is any of them relevant?
     Precision@K: What percentage of the returned images are relevant
     Set Recall@K: What percentage of the relevant images was returned?
+    mAP: Mean Average Precision@K for each K images returned.
 
     If K exceeds the candidate count, precision uses the number actually
     returned, min(K, number of candidates).
     """
     results = {metric: {"i2t": {}, "t2i": {}}
                for metric in ("recall", "precision", "set_recall")}
+    
+    results["map"] = {
+        "i2t": mean_average_precision(i2t_ranking, relevance),
+        "t2i": mean_average_precision(t2i_ranking, relevance.T),
+    }
+
     for direction, top_k, relevant in (("i2t", i2t_top_k, relevance),
                                       ("t2i", t2i_top_k, relevance.T)):
         hits = relevant.gather(1, top_k)
@@ -164,6 +182,10 @@ def evaluate_retrieval(model, test_loader, device, ks=(1, 5, 10), debug_oracle=F
 
     i2t_top_k = similarity.topk(min(max(ks), similarity.shape[1]), dim=1).indices
     t2i_top_k = similarity.T.topk(min(max(ks), similarity.shape[0]), dim=1).indices
+    # Keep the existing top-K rankings; use a full sort only for mAP.
+    # Equal scores retain candidate order, making the mAP tie policy explicit.
+    i2t_ranking = similarity.argsort(dim=1, descending=True, stable=True)
+    t2i_ranking = similarity.T.argsort(dim=1, descending=True, stable=True)
 
     image_indices = torch.arange(len(unique_ids), device=device)
 
@@ -172,7 +194,7 @@ def evaluate_retrieval(model, test_loader, device, ks=(1, 5, 10), debug_oracle=F
     exact_matches = image_indices[:, None] == caption_to_img[None, :]
     results = {
         "loss": running_loss / len(test_loader),
-        "exact": retrieval_metrics(i2t_top_k, t2i_top_k, exact_matches, ks),
+        "exact": retrieval_metrics(i2t_top_k, t2i_top_k, exact_matches, ks, i2t_ranking, t2i_ranking),
     }
 
     if retrieval_match_mode != "exact":
@@ -180,10 +202,10 @@ def evaluate_retrieval(model, test_loader, device, ks=(1, 5, 10), debug_oracle=F
         image_groups = caption_groups[first_indices]
         group_matches = exact_matches | (image_groups[:, None] == caption_groups[None, :])
 
-        results["group"] = retrieval_metrics(i2t_top_k, t2i_top_k, group_matches, ks)
+        results["group"] = retrieval_metrics(i2t_top_k, t2i_top_k, group_matches, ks, i2t_ranking, t2i_ranking)
         if retrieval_match_mode == "group_text":
             group_text_matches = add_identical_caption_relevance(group_matches, caption_to_img, token_sequences)
-            results["group_text"] = retrieval_metrics(i2t_top_k, t2i_top_k, group_text_matches, ks)
+            results["group_text"] = retrieval_metrics(i2t_top_k, t2i_top_k, group_text_matches, ks, i2t_ranking, t2i_ranking)
 
     return results
 
@@ -223,6 +245,7 @@ def show_retrieval_metrics(results, ks=(1, 5, 10)):
 
             direction_mean = np.mean(list(metrics["recall"][direction].values()))
             print(f"Mean Recall@K: {direction_mean:.2%}")
+            print(f"mAP: {metrics['map'][direction]:.2%}")
 
         print(f"\nMean Recall@K (both directions): {mean_recall(metrics):.2%}")
 
