@@ -34,6 +34,8 @@ def print_retrieval_epoch_metrics(epoch, epochs, train_loss, results, match_mode
     for key, label in (("recall", "Recall"), ("precision", "Precision"), ("set_recall", "SetRecall")):
         values = '/'.join(f"{metrics[key]['t2i'][k]:.2%}" for k in ks)
         fields.append(f"{label}@{k_label}: {values}")
+
+    fields.append(f"mAP: {metrics['map']['t2i']:.2%}")
     
     if is_best:
         fields.append("best")
@@ -98,7 +100,7 @@ def train_retrieval(args, device, model, train_loader, val_loader):
 
     best_t2i_recall = -1.0
     best_epoch = 0
-    patience = 7
+    patience = 13
     epochs_without_improvement = 0
     checkpoint_path = get_run_checkpoint_path(args)
 
@@ -131,7 +133,7 @@ def train_retrieval(args, device, model, train_loader, val_loader):
             model.save_pretrained(checkpoint_path)
         else:
             epochs_without_improvement += 1
-            if epochs_without_improvement > patience:
+            if epochs_without_improvement >= patience:
                 print(f"Early stopping at epoch {epoch+1}")
                 break
 
